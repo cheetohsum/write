@@ -19,12 +19,11 @@ use crate::theme;
 use crate::ui;
 
 const DEBOUNCE_IDLE_MS: u64 = 1500;
-const DEBOUNCE_WORD_MS: u64 = 500;
-const DEBOUNCE_SENTENCE_MS: u64 = 200;
-const DEBOUNCE_NEWLINE_MS: u64 = 200;
-const DEBOUNCE_MICRO_MS: u64 = 150;
+const DEBOUNCE_WORD_MS: u64 = 600;
+const DEBOUNCE_SENTENCE_MS: u64 = 300;
+const DEBOUNCE_NEWLINE_MS: u64 = 300;
+const DEBOUNCE_MICRO_MS: u64 = 500;
 const DEBOUNCE_RATE_LIMITED_MS: u64 = 8000;
-const ANIMATION_DURATION_MS: u64 = 200;
 const STARTUP_ANIM_MS: u64 = 900;
 const TRANSITION_MS: u64 = 350;
 
@@ -53,13 +52,6 @@ pub enum RevealStyle {
     Scatter,
     ZoomIn,
     ZoomOut,
-}
-
-pub struct AnimationState {
-    pub new_text: String,
-    pub changed_positions: Vec<(usize, usize)>,
-    pub resolve_times: Vec<u64>,
-    pub start: Instant,
 }
 
 pub struct StartupAnim {
@@ -99,7 +91,6 @@ pub struct AppState<'a> {
     pub in_flight: bool,
     pub should_quit: bool,
     pub words_since_send: u8,
-    pub animation: Option<AnimationState>,
     pub startup_anim: Option<StartupAnim>,
     pub transition: Option<TransitionAnim>,
     // Graph-node navigation
@@ -148,7 +139,6 @@ impl<'a> AppState<'a> {
             in_flight: false,
             should_quit: false,
             words_since_send: 0,
-            animation: None,
             startup_anim: Some(StartupAnim {
                 start: Instant::now(),
             }),
@@ -215,37 +205,6 @@ pub async fn run(
             }
         }
 
-        // Drive LLM cleanup animation
-        let anim_action = if let Some(ref anim) = state.animation {
-            let elapsed = anim.start.elapsed().as_millis() as u64;
-            if elapsed >= ANIMATION_DURATION_MS {
-                Some(AnimAction::Complete(anim.new_text.clone()))
-            } else {
-                let frame = generate_scramble_frame(
-                    &anim.new_text,
-                    &anim.changed_positions,
-                    &anim.resolve_times,
-                    elapsed,
-                    anim.start.elapsed().as_nanos() as u64,
-                );
-                Some(AnimAction::Frame(frame))
-            }
-        } else {
-            None
-        };
-        match anim_action {
-            Some(AnimAction::Complete(text)) => {
-                state.animation = None;
-                state.editor.replace_content(&text);
-                state.editor.last_sent_hash = llm::content_hash(&text);
-                state.llm_status = LlmStatus::Applied;
-            }
-            Some(AnimAction::Frame(frame)) => {
-                state.editor.replace_content(&frame);
-            }
-            None => {}
-        }
-
         // Render
         terminal.draw(|f| ui::render(f, &mut state))?;
 
@@ -270,7 +229,6 @@ pub async fn run(
             && state.llm_enabled
             && !state.in_flight
             && state.editor.modified
-            && state.animation.is_none()
             && state.transition.is_none()
         {
             let elapsed = state.last_keypress.elapsed();
@@ -294,8 +252,7 @@ pub async fn run(
             }
         }
 
-        let animating = state.animation.is_some()
-            || state.startup_anim.is_some()
+        let animating = state.startup_anim.is_some()
             || state.transition.is_some();
         let poll_duration = if animating {
             Duration::from_millis(30)
@@ -327,11 +284,7 @@ pub async fn run(
 
                     state.last_keypress = Instant::now();
 
-                    if let Some(anim) = state.animation.take() {
-                        state.editor.replace_content(&anim.new_text);
-                        state.editor.last_sent_hash = llm::content_hash(&anim.new_text);
-                        state.llm_status = LlmStatus::Applied;
-                    }
+
 
                     handle_key(&mut state, key)?;
 
@@ -629,26 +582,11 @@ fn handle_llm_response(state: &mut AppState, response: LlmResponse) {
         return;
     }
 
-    let start_nanos = Instant::now().elapsed().as_nanos() as u64;
-    let resolve_times: Vec<u64> = changed
-        .iter()
-        .enumerate()
-        .map(|(i, _)| {
-            let seed = start_nanos
-                .wrapping_add(i as u64)
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            30 + ((seed >> 33) % 160)
-        })
-        .collect();
-
-    state.animation = Some(AnimationState {
-        new_text: new_text.clone(),
-        changed_positions: changed,
-        resolve_times,
-        start: Instant::now(),
-    });
-    state.llm_status = LlmStatus::Cleaning;
+    // Apply cleaned text directly — no animation to avoid cursor disruption
+    state.editor.replace_content(new_text);
+    state.editor.wrap_all_lines();
+    state.editor.last_sent_hash = llm::content_hash(new_text);
+    state.llm_status = LlmStatus::Applied;
     state.debounce_duration = Duration::from_millis(DEBOUNCE_IDLE_MS);
 }
 
@@ -679,12 +617,7 @@ fn sanitize_filename(name: &str) -> String {
         .to_string()
 }
 
-// --- Animation helpers ---
-
-enum AnimAction {
-    Frame(String),
-    Complete(String),
-}
+// --- Helpers ---
 
 fn diff_positions(old: &str, new: &str) -> Vec<(usize, usize)> {
     let mut positions = Vec::new();
@@ -711,45 +644,4 @@ fn diff_positions(old: &str, new: &str) -> Vec<(usize, usize)> {
     }
 
     positions
-}
-
-fn generate_scramble_frame(
-    new_text: &str,
-    changed_positions: &[(usize, usize)],
-    resolve_times: &[u64],
-    elapsed_ms: u64,
-    frame_seed: u64,
-) -> String {
-    let mut lines: Vec<Vec<char>> = new_text.lines().map(|l| l.chars().collect()).collect();
-    if lines.is_empty() {
-        lines.push(Vec::new());
-    }
-
-    for (i, &(row, col)) in changed_positions.iter().enumerate() {
-        if elapsed_ms < resolve_times[i] {
-            if let Some(line) = lines.get_mut(row) {
-                if col < line.len() {
-                    let seed = frame_seed
-                        .wrapping_mul(6364136223846793005)
-                        .wrapping_add(i as u64 * 2654435761)
-                        .wrapping_add(elapsed_ms / 35);
-                    line[col] = pseudo_random_char(seed);
-                }
-            }
-        }
-    }
-
-    lines
-        .iter()
-        .map(|l| l.iter().collect::<String>())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn pseudo_random_char(seed: u64) -> char {
-    const CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
-    let h = seed
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(1442695040888963407);
-    CHARS[((h >> 33) as usize) % CHARS.len()] as char
 }
