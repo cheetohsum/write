@@ -18,10 +18,11 @@ use crate::llm::{self, LlmRequest, LlmResponse};
 use crate::theme;
 use crate::ui;
 
-const DEBOUNCE_IDLE_MS: u64 = 2000;
-const DEBOUNCE_WORD_MS: u64 = 800;
-const DEBOUNCE_SENTENCE_MS: u64 = 300;
-const DEBOUNCE_NEWLINE_MS: u64 = 400;
+const DEBOUNCE_IDLE_MS: u64 = 1500;
+const DEBOUNCE_WORD_MS: u64 = 500;
+const DEBOUNCE_SENTENCE_MS: u64 = 200;
+const DEBOUNCE_NEWLINE_MS: u64 = 200;
+const DEBOUNCE_MICRO_MS: u64 = 150;
 const DEBOUNCE_RATE_LIMITED_MS: u64 = 8000;
 const ANIMATION_DURATION_MS: u64 = 200;
 const STARTUP_ANIM_MS: u64 = 900;
@@ -97,6 +98,7 @@ pub struct AppState<'a> {
     pub debounce_duration: Duration,
     pub in_flight: bool,
     pub should_quit: bool,
+    pub words_since_send: u8,
     pub animation: Option<AnimationState>,
     pub startup_anim: Option<StartupAnim>,
     pub transition: Option<TransitionAnim>,
@@ -145,6 +147,7 @@ impl<'a> AppState<'a> {
             debounce_duration: Duration::from_millis(DEBOUNCE_IDLE_MS),
             in_flight: false,
             should_quit: false,
+            words_since_send: 0,
             animation: None,
             startup_anim: Some(StartupAnim {
                 start: Instant::now(),
@@ -280,6 +283,7 @@ pub async fn run(
                         let text = state.editor.content();
                         state.editor.last_sent_hash = current_hash.clone();
                         state.in_flight = true;
+                        state.words_since_send = 0;
                         state.llm_status = LlmStatus::Cleaning;
                         let _ = tx.try_send(LlmRequest {
                             text,
@@ -452,9 +456,10 @@ fn handle_editor_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
 
             // Set debounce urgency based on what was typed
             if matches!(key_event.code, KeyCode::Enter) {
-                // Newline = paragraph break, trigger cleanup fast
                 state.debounce_duration = Duration::from_millis(DEBOUNCE_NEWLINE_MS);
+                state.words_since_send += 1;
             } else if matches!(key_event.code, KeyCode::Char(' ')) {
+                state.words_since_send += 1;
                 let (row, col) = state.editor.textarea.cursor();
                 let is_sentence_end = if let Some(line) = state.editor.textarea.lines().get(row) {
                     let chars: Vec<char> = line.chars().collect();
@@ -463,7 +468,10 @@ fn handle_editor_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
                 } else {
                     false
                 };
-                state.debounce_duration = if is_sentence_end {
+                // Micro-trigger: after 2-3 words, fire cleanup very fast
+                state.debounce_duration = if state.words_since_send >= 3 {
+                    Duration::from_millis(DEBOUNCE_MICRO_MS)
+                } else if is_sentence_end {
                     Duration::from_millis(DEBOUNCE_SENTENCE_MS)
                 } else {
                     Duration::from_millis(DEBOUNCE_WORD_MS)

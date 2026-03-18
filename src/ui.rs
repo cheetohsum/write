@@ -252,7 +252,7 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
     f.render_widget(&state.editor.textarea, editor_padded[1]);
 
     // Style [[wiki-links]] in the rendered buffer
-    style_wiki_links(f.buffer_mut(), editor_padded[1]);
+    style_markdown(f.buffer_mut(), editor_padded[1]);
 
     // Status bar
     let llm_status_text = match state.llm_status {
@@ -370,45 +370,223 @@ fn render_quit_modal(f: &mut Frame, area: Rect) {
     );
 }
 
-// --- [[wiki-link]] styling ---
+// --- Markdown rich text + [[wiki-link]] styling ---
 
-fn style_wiki_links(buf: &mut Buffer, area: Rect) {
+fn style_markdown(buf: &mut Buffer, area: Rect) {
     for y in area.top()..area.bottom() {
-        let mut x = area.left();
-        while x + 1 < area.right() {
-            let c1 = buf[(x, y)].symbol().chars().next().unwrap_or(' ');
-            let c2 = buf[(x + 1, y)].symbol().chars().next().unwrap_or(' ');
+        // Extract line content from buffer
+        let width = (area.right() - area.left()) as usize;
+        let chars: Vec<char> = (0..width)
+            .map(|i| {
+                let x = area.left() + i as u16;
+                buf[(x, y)].symbol().chars().next().unwrap_or(' ')
+            })
+            .collect();
+        let line: String = chars.iter().collect();
+        let trimmed = line.trim_start();
+        let indent = line.len() - trimmed.len();
 
-            if c1 == '[' && c2 == '[' {
-                // Found [[, scan for ]]
-                let start_x = x;
-                let mut end_x = x + 2;
-                let mut found = false;
-                while end_x + 1 < area.right() {
-                    let e1 = buf[(end_x, y)].symbol().chars().next().unwrap_or(' ');
-                    let e2 = buf[(end_x + 1, y)].symbol().chars().next().unwrap_or(' ');
-                    if e1 == ']' && e2 == ']' {
-                        found = true;
-                        // Style brackets: subtle
-                        for bx in [start_x, start_x + 1, end_x, end_x + 1] {
-                            buf[(bx, y)].set_fg(theme::SANDSTONE);
-                        }
-                        // Style content: bold maroon
-                        for cx in (start_x + 2)..end_x {
-                            buf[(cx, y)].set_fg(theme::MAROON);
-                            buf[(cx, y)].modifier.insert(Modifier::BOLD);
-                        }
-                        x = end_x + 2;
-                        break;
-                    }
-                    end_x += 1;
-                }
-                if !found {
-                    x += 1;
-                }
-            } else {
-                x += 1;
+        // Headers: # ## ###
+        if trimmed.starts_with("### ") || trimmed.starts_with("#### ") {
+            style_line(buf, area, y, indent, theme::GOLD, true);
+            dim_range(buf, area, y, indent, indent + trimmed.find(' ').unwrap_or(0));
+            continue;
+        }
+        if trimmed.starts_with("## ") {
+            style_line(buf, area, y, indent, theme::TERRACOTTA, true);
+            dim_range(buf, area, y, indent, indent + 2);
+            continue;
+        }
+        if trimmed.starts_with("# ") {
+            style_line(buf, area, y, indent, theme::MAROON, true);
+            dim_range(buf, area, y, indent, indent + 1);
+            continue;
+        }
+
+        // Blockquote: >
+        if trimmed.starts_with("> ") {
+            style_line(buf, area, y, indent, theme::CLAY, false);
+            // Color the > marker in gold
+            let gx = area.left() + indent as u16;
+            if gx < area.right() {
+                buf[(gx, y)].set_fg(theme::GOLD);
             }
+            // Still process inline formatting below
+        }
+
+        // List bullets: - or *  (but * not when used for emphasis)
+        if trimmed.starts_with("- ") {
+            let bx = area.left() + indent as u16;
+            if bx < area.right() {
+                buf[(bx, y)].set_fg(theme::TERRACOTTA);
+                buf[(bx, y)].modifier.insert(Modifier::BOLD);
+            }
+        }
+
+        // Inline formatting pass
+        let mut used = vec![false; width];
+
+        // Wiki-links: [[...]]
+        {
+            let mut i = 0;
+            while i + 3 < width {
+                if chars[i] == '[' && chars[i + 1] == '[' && !used[i] {
+                    if let Some(end) = find_closing(&chars, i + 2, ']', ']') {
+                        // Dim brackets
+                        for b in [i, i + 1, end, end + 1] {
+                            set_fg(buf, area, y, b, theme::SANDSTONE);
+                            used[b] = true;
+                        }
+                        // Bold maroon content
+                        for c in (i + 2)..end {
+                            set_fg(buf, area, y, c, theme::MAROON);
+                            set_bold(buf, area, y, c);
+                            used[c] = true;
+                        }
+                        i = end + 2;
+                        continue;
+                    }
+                }
+                i += 1;
+            }
+        }
+
+        // Bold: **...**
+        {
+            let mut i = 0;
+            while i + 3 < width {
+                if chars[i] == '*' && chars[i + 1] == '*' && !used[i] {
+                    if let Some(end) = find_closing(&chars, i + 2, '*', '*') {
+                        // Dim markers
+                        for b in [i, i + 1, end, end + 1] {
+                            set_fg(buf, area, y, b, theme::SANDSTONE);
+                            used[b] = true;
+                        }
+                        // Bold content
+                        for c in (i + 2)..end {
+                            if !used[c] {
+                                set_bold(buf, area, y, c);
+                                used[c] = true;
+                            }
+                        }
+                        i = end + 2;
+                        continue;
+                    }
+                }
+                i += 1;
+            }
+        }
+
+        // Italic: *...* (single, not already consumed by bold)
+        {
+            let mut i = 0;
+            while i + 1 < width {
+                if chars[i] == '*' && !used[i] {
+                    // Find closing single *
+                    let mut j = i + 1;
+                    while j < width {
+                        if chars[j] == '*' && !used[j] {
+                            set_fg(buf, area, y, i, theme::SANDSTONE);
+                            set_fg(buf, area, y, j, theme::SANDSTONE);
+                            for c in (i + 1)..j {
+                                if !used[c] {
+                                    set_italic(buf, area, y, c);
+                                }
+                            }
+                            i = j + 1;
+                            break;
+                        }
+                        j += 1;
+                    }
+                    if j >= width {
+                        i += 1;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+        }
+
+        // Inline code: `...`
+        {
+            let mut i = 0;
+            while i + 1 < width {
+                if chars[i] == '`' && !used[i] {
+                    let mut j = i + 1;
+                    while j < width {
+                        if chars[j] == '`' && !used[j] {
+                            set_fg(buf, area, y, i, theme::SANDSTONE);
+                            set_fg(buf, area, y, j, theme::SANDSTONE);
+                            for c in (i + 1)..j {
+                                if !used[c] {
+                                    set_fg(buf, area, y, c, theme::CLAY);
+                                }
+                            }
+                            i = j + 1;
+                            break;
+                        }
+                        j += 1;
+                    }
+                    if j >= width {
+                        i += 1;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+        }
+    }
+}
+
+fn find_closing(chars: &[char], from: usize, c1: char, c2: char) -> Option<usize> {
+    let mut i = from;
+    while i + 1 < chars.len() {
+        if chars[i] == c1 && chars[i + 1] == c2 {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+fn set_fg(buf: &mut Buffer, area: Rect, y: u16, col: usize, color: Color) {
+    let x = area.left() + col as u16;
+    if x < area.right() {
+        buf[(x, y)].set_fg(color);
+    }
+}
+
+fn set_bold(buf: &mut Buffer, area: Rect, y: u16, col: usize) {
+    let x = area.left() + col as u16;
+    if x < area.right() {
+        buf[(x, y)].modifier.insert(Modifier::BOLD);
+    }
+}
+
+fn set_italic(buf: &mut Buffer, area: Rect, y: u16, col: usize) {
+    let x = area.left() + col as u16;
+    if x < area.right() {
+        buf[(x, y)].modifier.insert(Modifier::ITALIC);
+    }
+}
+
+fn style_line(buf: &mut Buffer, area: Rect, y: u16, from: usize, color: Color, bold: bool) {
+    for i in from..area.width as usize {
+        let x = area.left() + i as u16;
+        if x < area.right() {
+            buf[(x, y)].set_fg(color);
+            if bold {
+                buf[(x, y)].modifier.insert(Modifier::BOLD);
+            }
+        }
+    }
+}
+
+fn dim_range(buf: &mut Buffer, area: Rect, y: u16, from: usize, to: usize) {
+    for i in from..=to {
+        let x = area.left() + i as u16;
+        if x < area.right() {
+            buf[(x, y)].set_fg(theme::SANDSTONE);
         }
     }
 }
