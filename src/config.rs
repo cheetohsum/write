@@ -29,7 +29,7 @@ impl LlmConfig {
         // Show a clean short name
         let short_model = match self.model.as_str() {
             "claude-haiku-4-5-20241022" => "haiku",
-            "gpt-4o-mini" => "4o-mini",
+            "gpt-4.1-nano" => "4.1-nano",
             other => other,
         };
         format!("{} · {}", self.provider.display_name(), short_model)
@@ -74,7 +74,7 @@ fn try_openai(model: Option<String>) -> Option<LlmConfig> {
     env::var("OPENAI_API_KEY").ok().map(|key| LlmConfig {
         provider: Provider::OpenAI,
         api_key: key,
-        model: model.unwrap_or_else(|| "gpt-4o-mini".to_string()),
+        model: model.unwrap_or_else(|| "gpt-4.1-nano".to_string()),
     })
 }
 

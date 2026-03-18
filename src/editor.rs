@@ -117,25 +117,18 @@ impl<'a> EditorState<'a> {
     }
 
     /// Replace content only if it actually changed.
-    /// Cursor stays at the end of the line it was on (writing position).
+    /// Cursor goes to end of last line (where the user is writing).
     pub fn replace_content(&mut self, new_text: &str) {
         if self.content() == new_text {
             return;
         }
-        let (row, _col) = self.textarea.cursor();
 
         self.textarea.select_all();
         self.textarea.cut();
         self.textarea.insert_str(new_text);
 
-        // Restore to same row, but at end of line (user is typing there)
-        let line_count = self.textarea.lines().len();
-        let target_row = row.min(line_count.saturating_sub(1));
-        self.textarea.move_cursor(CursorMove::Top);
-        self.textarea.move_cursor(CursorMove::Head);
-        for _ in 0..target_row {
-            self.textarea.move_cursor(CursorMove::Down);
-        }
+        // Always go to the very end — bottom-right writing position
+        self.textarea.move_cursor(CursorMove::Bottom);
         self.textarea.move_cursor(CursorMove::End);
     }
 

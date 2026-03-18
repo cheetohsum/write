@@ -93,6 +93,7 @@ pub struct AppState<'a> {
     pub in_flight: bool,
     pub should_quit: bool,
     pub words_since_send: u8,
+    pub last_click: Option<(Instant, u16, u16)>,
     pub startup_anim: Option<StartupAnim>,
     pub transition: Option<TransitionAnim>,
     pub editor_area: Rect,
@@ -143,6 +144,7 @@ impl<'a> AppState<'a> {
             in_flight: false,
             should_quit: false,
             words_since_send: 0,
+            last_click: None,
             editor_area: Rect::default(),
             startup_anim: Some(StartupAnim {
                 start: Instant::now(),
@@ -308,16 +310,22 @@ pub async fn run(
                             && mouse.row >= area.top()
                             && mouse.row < area.bottom()
                         {
+                            // Check for double-click (within 400ms, same position)
+                            let is_double = state.last_click.map_or(false, |(t, lx, ly)| {
+                                t.elapsed().as_millis() < 400
+                                    && lx == mouse.column
+                                    && ly == mouse.row
+                            });
+
+                            // Position cursor at click
                             let click_row = (mouse.row - area.top()) as usize;
                             let click_col = (mouse.column - area.left()) as usize;
-
-                            // Estimate scroll offset from cursor position
                             let (cur_row, _) = state.editor.textarea.cursor();
                             let viewport_h = area.height as usize;
-                            let scroll_top = cur_row.saturating_sub(viewport_h.saturating_sub(1));
-                            let target_row = scroll_top + click_row;
-                            let line_count = state.editor.textarea.lines().len();
-                            let target_row = target_row.min(line_count.saturating_sub(1));
+                            let scroll_top =
+                                cur_row.saturating_sub(viewport_h.saturating_sub(1));
+                            let target_row = (scroll_top + click_row)
+                                .min(state.editor.textarea.lines().len().saturating_sub(1));
 
                             state.editor.textarea.move_cursor(CursorMove::Top);
                             state.editor.textarea.move_cursor(CursorMove::Head);
@@ -334,6 +342,17 @@ pub async fn run(
                             let target_col = click_col.min(line_len);
                             for _ in 0..target_col {
                                 state.editor.textarea.move_cursor(CursorMove::Forward);
+                            }
+
+                            // Double-click on a [[link]] → navigate into it
+                            if is_double {
+                                if state.editor.find_link_at_cursor().is_some() {
+                                    let _ = navigate_into_link(&mut state);
+                                }
+                                state.last_click = None;
+                            } else {
+                                state.last_click =
+                                    Some((Instant::now(), mouse.column, mouse.row));
                             }
                         }
                     }
