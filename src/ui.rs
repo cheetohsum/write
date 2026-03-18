@@ -389,17 +389,17 @@ fn style_markdown(buf: &mut Buffer, area: Rect) {
         // Headers: # ## ###
         if trimmed.starts_with("### ") || trimmed.starts_with("#### ") {
             style_line(buf, area, y, indent, theme::GOLD, true);
-            dim_range(buf, area, y, indent, indent + trimmed.find(' ').unwrap_or(0));
+            hide_range(buf, area, y, indent, indent + trimmed.find(' ').unwrap_or(0));
             continue;
         }
         if trimmed.starts_with("## ") {
             style_line(buf, area, y, indent, theme::TERRACOTTA, true);
-            dim_range(buf, area, y, indent, indent + 2);
+            hide_range(buf, area, y, indent, indent + 2);
             continue;
         }
         if trimmed.starts_with("# ") {
             style_line(buf, area, y, indent, theme::MAROON, true);
-            dim_range(buf, area, y, indent, indent + 1);
+            hide_range(buf, area, y, indent, indent + 1);
             continue;
         }
 
@@ -457,9 +457,9 @@ fn style_markdown(buf: &mut Buffer, area: Rect) {
             while i + 3 < width {
                 if chars[i] == '*' && chars[i + 1] == '*' && !used[i] {
                     if let Some(end) = find_closing(&chars, i + 2, '*', '*') {
-                        // Dim markers
+                        // Hide ** markers
                         for b in [i, i + 1, end, end + 1] {
-                            set_fg(buf, area, y, b, theme::SANDSTONE);
+                            hide_char(buf, area, y, b);
                             used[b] = true;
                         }
                         // Bold content
@@ -486,8 +486,8 @@ fn style_markdown(buf: &mut Buffer, area: Rect) {
                     let mut j = i + 1;
                     while j < width {
                         if chars[j] == '*' && !used[j] {
-                            set_fg(buf, area, y, i, theme::SANDSTONE);
-                            set_fg(buf, area, y, j, theme::SANDSTONE);
+                            hide_char(buf, area, y, i);
+                            hide_char(buf, area, y, j);
                             for c in (i + 1)..j {
                                 if !used[c] {
                                     set_italic(buf, area, y, c);
@@ -515,8 +515,8 @@ fn style_markdown(buf: &mut Buffer, area: Rect) {
                     let mut j = i + 1;
                     while j < width {
                         if chars[j] == '`' && !used[j] {
-                            set_fg(buf, area, y, i, theme::SANDSTONE);
-                            set_fg(buf, area, y, j, theme::SANDSTONE);
+                            hide_char(buf, area, y, i);
+                            hide_char(buf, area, y, j);
                             for c in (i + 1)..j {
                                 if !used[c] {
                                     set_fg(buf, area, y, c, theme::CLAY);
@@ -547,6 +547,14 @@ fn find_closing(chars: &[char], from: usize, c1: char, c2: char) -> Option<usize
         i += 1;
     }
     None
+}
+
+fn hide_char(buf: &mut Buffer, area: Rect, y: u16, col: usize) {
+    let x = area.left() + col as u16;
+    if x < area.right() {
+        buf[(x, y)].set_char(' ');
+        buf[(x, y)].set_fg(theme::PARCHMENT);
+    }
 }
 
 fn set_fg(buf: &mut Buffer, area: Rect, y: u16, col: usize, color: Color) {
@@ -582,12 +590,9 @@ fn style_line(buf: &mut Buffer, area: Rect, y: u16, from: usize, color: Color, b
     }
 }
 
-fn dim_range(buf: &mut Buffer, area: Rect, y: u16, from: usize, to: usize) {
+fn hide_range(buf: &mut Buffer, area: Rect, y: u16, from: usize, to: usize) {
     for i in from..=to {
-        let x = area.left() + i as u16;
-        if x < area.right() {
-            buf[(x, y)].set_fg(theme::SANDSTONE);
-        }
+        hide_char(buf, area, y, i);
     }
 }
 

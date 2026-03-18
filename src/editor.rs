@@ -81,7 +81,12 @@ impl<'a> EditorState<'a> {
         self.textarea.insert_newline();
     }
 
+    /// Replace content only if it actually changed. Preserves cursor position.
     pub fn replace_content(&mut self, new_text: &str) {
+        // Skip if content is identical — avoids cursor flicker
+        if self.content() == new_text {
+            return;
+        }
         let (row, col) = self.textarea.cursor();
         self.set_content_with_cursor(new_text, row, col);
     }
@@ -111,7 +116,6 @@ impl<'a> EditorState<'a> {
         }
     }
 
-    /// Find a [[wiki-link]] under the cursor. Returns the link name if found.
     pub fn find_link_at_cursor(&self) -> Option<String> {
         let (row, col) = self.textarea.cursor();
         let line = self.textarea.lines().get(row)?;
@@ -121,7 +125,6 @@ impl<'a> EditorState<'a> {
             let abs_start = pos + start;
             if let Some(end_offset) = line[abs_start + 2..].find("]]") {
                 let abs_end = abs_start + 2 + end_offset;
-                // cursor within [[...]] inclusive of brackets
                 if col >= abs_start && col <= abs_end + 1 {
                     let name = &line[abs_start + 2..abs_end];
                     if !name.is_empty() {
@@ -136,9 +139,7 @@ impl<'a> EditorState<'a> {
         None
     }
 
-    /// Wrap the word under cursor in [[...]] to create a wiki-link.
     pub fn create_link_at_cursor(&mut self) {
-        // Don't double-wrap
         if self.find_link_at_cursor().is_some() {
             return;
         }
@@ -154,10 +155,8 @@ impl<'a> EditorState<'a> {
             return;
         }
 
-        // Clamp col for word search
         let search_col = col.min(chars.len().saturating_sub(1));
 
-        // Find word boundaries (alphanumeric, apostrophe, hyphen)
         let mut start = search_col;
         while start > 0
             && (chars[start - 1].is_alphanumeric()
@@ -180,21 +179,17 @@ impl<'a> EditorState<'a> {
 
         let word_len = end - start;
 
-        // Move cursor to word start
         self.textarea.move_cursor(CursorMove::Head);
         for _ in 0..start {
             self.textarea.move_cursor(CursorMove::Forward);
         }
 
-        // Insert [[
         self.textarea.insert_str("[[");
 
-        // Move past the word
         for _ in 0..word_len {
             self.textarea.move_cursor(CursorMove::Forward);
         }
 
-        // Insert ]]
         self.textarea.insert_str("]]");
 
         self.modified = true;

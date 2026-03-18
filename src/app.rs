@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use tui_textarea::CursorMove;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
@@ -340,11 +340,8 @@ pub async fn run(
                     }
                 }
                 Event::Mouse(mouse) => {
-                    // Forward mouse clicks to textarea for cursor positioning
-                    if state.screen == Screen::Editor
-                        && state.transition.is_none()
-                        && matches!(mouse.kind, MouseEventKind::Down(_))
-                    {
+                    if state.screen == Screen::Editor && state.transition.is_none() {
+                        // Forward all mouse events to textarea for cursor + selection
                         state.editor.textarea.input(Event::Mouse(mouse));
                     }
                 }
