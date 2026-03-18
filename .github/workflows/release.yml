@@ -147,9 +147,8 @@ jobs:
 
       - name: Prepare assets
         run: |
-          mv artifacts/Write-windows-x86_64/Write-windows-x86_64.zip ./
-          mv artifacts/Write-macos-aarch64/Write-macos-aarch64.dmg ./
-          mv artifacts/Write-macos-x86_64/Write-macos-x86_64.dmg ./
+          find artifacts/ -type f -name '*.zip' -o -name '*.dmg' | while read f; do mv "$f" ./; done
+          ls -la *.zip *.dmg
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
