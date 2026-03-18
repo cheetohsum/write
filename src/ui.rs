@@ -145,8 +145,18 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
         .style(theme::title_bar());
     f.render_widget(title_bar, chunks[0]);
 
-    // Editor
-    f.render_widget(&state.editor.textarea, chunks[1]);
+    // Editor with horizontal padding (5 columns each side)
+    let editor_padded = Layout::horizontal([
+        Constraint::Length(5),
+        Constraint::Min(1),
+        Constraint::Length(5),
+    ])
+    .split(chunks[1]);
+    // Fill padding areas with background
+    let pad_bg = Block::default().style(theme::base());
+    f.render_widget(pad_bg.clone(), editor_padded[0]);
+    f.render_widget(pad_bg, editor_padded[2]);
+    f.render_widget(&state.editor.textarea, editor_padded[1]);
 
     // Status bar
     let llm_status = match state.llm_status {

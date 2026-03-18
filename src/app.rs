@@ -1,10 +1,10 @@
 use std::fs;
+use std::io;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyEvent};
-use std::io;
+use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
@@ -17,8 +17,11 @@ use crate::llm::{self, LlmRequest, LlmResponse};
 use crate::theme;
 use crate::ui;
 
-const DEBOUNCE_SECS: u64 = 4;
-const DEBOUNCE_RATE_LIMITED_SECS: u64 = 8;
+const DEBOUNCE_IDLE_MS: u64 = 2000;
+const DEBOUNCE_WORD_MS: u64 = 800;
+const DEBOUNCE_SENTENCE_MS: u64 = 300;
+const DEBOUNCE_RATE_LIMITED_MS: u64 = 8000;
+const ANIMATION_DURATION_MS: u64 = 200;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Screen {
@@ -39,6 +42,13 @@ pub enum LlmStatus {
     Off,
 }
 
+pub struct AnimationState {
+    pub new_text: String,
+    pub changed_positions: Vec<(usize, usize)>,
+    pub resolve_times: Vec<u64>,
+    pub start: Instant,
+}
+
 pub struct AppState<'a> {
     pub screen: Screen,
     pub llm_config: Option<LlmConfig>,
@@ -47,7 +57,7 @@ pub struct AppState<'a> {
     pub output_dir: String,
     pub dir_input: TextArea<'a>,
     pub title_input: TextArea<'a>,
-    pub startup_field: u8, // 0 = dir, 1 = title
+    pub startup_field: u8,
     pub llm_status: LlmStatus,
     pub llm_enabled: bool,
     pub just_saved: bool,
@@ -56,6 +66,7 @@ pub struct AppState<'a> {
     pub debounce_duration: Duration,
     pub in_flight: bool,
     pub should_quit: bool,
+    pub animation: Option<AnimationState>,
 }
 
 impl<'a> AppState<'a> {
@@ -88,23 +99,26 @@ impl<'a> AppState<'a> {
             output_dir: default_dir,
             dir_input,
             title_input,
-            startup_field: 1, // start on title field since dir has default
+            startup_field: 1,
             llm_status,
             llm_enabled,
             just_saved: false,
             save_flash_until: None,
             last_keypress: Instant::now(),
-            debounce_duration: Duration::from_secs(DEBOUNCE_SECS),
+            debounce_duration: Duration::from_millis(DEBOUNCE_IDLE_MS),
             in_flight: false,
             should_quit: false,
+            animation: None,
         }
     }
 }
 
-pub async fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, llm_config: Option<LlmConfig>) -> Result<()> {
+pub async fn run(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    llm_config: Option<LlmConfig>,
+) -> Result<()> {
     let mut state = AppState::new(llm_config.clone());
 
-    // Set up LLM channels if configured
     let (llm_tx, mut llm_rx): (
         Option<mpsc::Sender<LlmRequest>>,
         Option<mpsc::Receiver<LlmResponse>>,
@@ -116,6 +130,41 @@ pub async fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, llm_conf
     };
 
     loop {
+        // Update wrap width from terminal size (minus padding)
+        let term_width = terminal.size()?.width;
+        state.editor.wrap_width = term_width.saturating_sub(10);
+
+        // Drive animation
+        let anim_action = if let Some(ref anim) = state.animation {
+            let elapsed = anim.start.elapsed().as_millis() as u64;
+            if elapsed >= ANIMATION_DURATION_MS {
+                Some(AnimAction::Complete(anim.new_text.clone()))
+            } else {
+                let frame = generate_scramble_frame(
+                    &anim.new_text,
+                    &anim.changed_positions,
+                    &anim.resolve_times,
+                    elapsed,
+                    anim.start.elapsed().as_nanos() as u64,
+                );
+                Some(AnimAction::Frame(frame))
+            }
+        } else {
+            None
+        };
+        match anim_action {
+            Some(AnimAction::Complete(text)) => {
+                state.animation = None;
+                state.editor.replace_content(&text);
+                state.editor.last_sent_hash = llm::content_hash(&text);
+                state.llm_status = LlmStatus::Applied;
+            }
+            Some(AnimAction::Frame(frame)) => {
+                state.editor.replace_content(&frame);
+            }
+            None => {}
+        }
+
         // Render
         terminal.draw(|f| ui::render(f, &mut state))?;
 
@@ -125,11 +174,6 @@ pub async fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, llm_conf
                 state.just_saved = false;
                 state.save_flash_until = None;
             }
-        }
-
-        // Handle applied status timeout (show "applied" for 3 seconds)
-        if state.llm_status == LlmStatus::Applied {
-            // We'll clear it on next debounce check
         }
 
         // Check for LLM responses (non-blocking)
@@ -145,31 +189,46 @@ pub async fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, llm_conf
             && state.llm_enabled
             && !state.in_flight
             && state.editor.modified
+            && state.animation.is_none()
         {
             let elapsed = state.last_keypress.elapsed();
             if elapsed >= state.debounce_duration {
                 let current_hash = state.editor.content_hash();
-                if current_hash != state.editor.last_sent_hash && !state.editor.content().trim().is_empty() {
-                    // Send to LLM
+                if current_hash != state.editor.last_sent_hash
+                    && !state.editor.content().trim().is_empty()
+                {
                     if let Some(ref tx) = llm_tx {
                         let text = state.editor.content();
                         state.editor.last_sent_hash = current_hash.clone();
                         state.in_flight = true;
                         state.llm_status = LlmStatus::Cleaning;
-                        let _ = tx
-                            .try_send(LlmRequest {
-                                text,
-                                hash: current_hash,
-                            });
+                        let _ = tx.try_send(LlmRequest {
+                            text,
+                            hash: current_hash,
+                        });
                     }
                 }
             }
         }
 
-        // Poll for events with short timeout for responsiveness
-        if event::poll(Duration::from_millis(100))? {
+        // Faster poll during animation for smooth scramble effect
+        let poll_duration = if state.animation.is_some() {
+            Duration::from_millis(35)
+        } else {
+            Duration::from_millis(100)
+        };
+
+        if event::poll(poll_duration)? {
             if let Event::Key(key) = event::read()? {
                 state.last_keypress = Instant::now();
+
+                // Cancel animation on any keypress — apply final text
+                if let Some(anim) = state.animation.take() {
+                    state.editor.replace_content(&anim.new_text);
+                    state.editor.last_sent_hash = llm::content_hash(&anim.new_text);
+                    state.llm_status = LlmStatus::Applied;
+                }
+
                 handle_key(&mut state, key)?;
 
                 if state.should_quit {
@@ -197,12 +256,10 @@ fn handle_startup_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
             state.startup_field = if state.startup_field == 0 { 1 } else { 0 };
         }
         Action::Confirm => {
-            // Extract values and transition to editor
             let dir = state.dir_input.lines().join("");
             let title = state.title_input.lines().join("");
 
             if title.trim().is_empty() {
-                // Don't proceed without a title
                 return Ok(());
             }
 
@@ -250,7 +307,26 @@ fn handle_editor_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
         }
         Action::ForwardToEditor(key_event) => {
             state.editor.handle_key(key_event);
-            // Reset applied status when user types
+
+            // Adjust debounce based on what was typed
+            if matches!(key_event.code, KeyCode::Char(' ')) {
+                let (row, col) = state.editor.textarea.cursor();
+                let is_sentence_end = if let Some(line) = state.editor.textarea.lines().get(row) {
+                    let chars: Vec<char> = line.chars().collect();
+                    col >= 2
+                        && matches!(chars.get(col.wrapping_sub(2)), Some('.' | '!' | '?'))
+                } else {
+                    false
+                };
+                state.debounce_duration = if is_sentence_end {
+                    Duration::from_millis(DEBOUNCE_SENTENCE_MS)
+                } else {
+                    Duration::from_millis(DEBOUNCE_WORD_MS)
+                };
+            } else {
+                state.debounce_duration = Duration::from_millis(DEBOUNCE_IDLE_MS);
+            }
+
             if state.llm_status == LlmStatus::Applied {
                 state.llm_status = LlmStatus::Idle;
             }
@@ -276,7 +352,7 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
 
 fn handle_llm_response(state: &mut AppState, response: LlmResponse) {
     if response.rate_limited {
-        state.debounce_duration = Duration::from_secs(DEBOUNCE_RATE_LIMITED_SECS);
+        state.debounce_duration = Duration::from_millis(DEBOUNCE_RATE_LIMITED_MS);
         state.llm_status = LlmStatus::Error;
         return;
     }
@@ -289,7 +365,6 @@ fn handle_llm_response(state: &mut AppState, response: LlmResponse) {
     // Check staleness
     let current_hash = state.editor.content_hash();
     if response.original_hash != current_hash {
-        // Content changed since we sent - discard, debounce will re-trigger
         state.llm_status = LlmStatus::Idle;
         return;
     }
@@ -297,18 +372,49 @@ fn handle_llm_response(state: &mut AppState, response: LlmResponse) {
     // Sanity check: response shouldn't be wildly different in length
     let original_len = state.editor.content().len();
     let cleaned_len = response.cleaned_text.len();
-    if cleaned_len > original_len * 2 || cleaned_len < original_len / 3 {
+    if cleaned_len > original_len * 2 || (original_len > 10 && cleaned_len < original_len / 3) {
         state.llm_status = LlmStatus::Error;
         return;
     }
 
-    // Apply the cleaned text
-    state.editor.replace_content(&response.cleaned_text);
-    state.editor.last_sent_hash = llm::content_hash(&response.cleaned_text);
-    state.llm_status = LlmStatus::Applied;
+    let old_text = state.editor.content();
+    let new_text = &response.cleaned_text;
 
-    // Reset debounce duration (in case it was doubled from rate limit)
-    state.debounce_duration = Duration::from_secs(DEBOUNCE_SECS);
+    // Compute diff
+    let changed = diff_positions(&old_text, new_text);
+    if changed.is_empty() {
+        // No changes — just update hash and status
+        state.editor.last_sent_hash = llm::content_hash(new_text);
+        state.llm_status = LlmStatus::Applied;
+        state.debounce_duration = Duration::from_millis(DEBOUNCE_IDLE_MS);
+        return;
+    }
+
+    // Generate resolve times: each position settles at a random time between 30-190ms
+    let start_nanos = Instant::now().elapsed().as_nanos() as u64;
+    let resolve_times: Vec<u64> = changed
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            let seed = start_nanos
+                .wrapping_add(i as u64)
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            30 + ((seed >> 33) % 160)
+        })
+        .collect();
+
+    // Start animation
+    state.animation = Some(AnimationState {
+        new_text: new_text.clone(),
+        changed_positions: changed,
+        resolve_times,
+        start: Instant::now(),
+    });
+    state.llm_status = LlmStatus::Cleaning;
+
+    // Reset debounce
+    state.debounce_duration = Duration::from_millis(DEBOUNCE_IDLE_MS);
 }
 
 fn save_document(state: &mut AppState) -> Result<()> {
@@ -317,7 +423,6 @@ fn save_document(state: &mut AppState) -> Result<()> {
 
     let filename = format!("{}.md", state.doc_title);
     let path = dir.join(filename);
-
     fs::write(&path, state.editor.content())?;
 
     state.editor.modified = false;
@@ -339,4 +444,79 @@ fn sanitize_filename(name: &str) -> String {
         .collect::<String>()
         .trim()
         .to_string()
+}
+
+// --- Animation helpers ---
+
+enum AnimAction {
+    Frame(String),
+    Complete(String),
+}
+
+fn diff_positions(old: &str, new: &str) -> Vec<(usize, usize)> {
+    let mut positions = Vec::new();
+    let old_lines: Vec<&str> = old.lines().collect();
+    let new_lines: Vec<&str> = new.lines().collect();
+
+    let max_lines = old_lines.len().max(new_lines.len());
+    for row in 0..max_lines {
+        let old_chars: Vec<char> = old_lines
+            .get(row)
+            .map(|l| l.chars().collect())
+            .unwrap_or_default();
+        let new_chars: Vec<char> = new_lines
+            .get(row)
+            .map(|l| l.chars().collect())
+            .unwrap_or_default();
+
+        let max_cols = old_chars.len().max(new_chars.len());
+        for col in 0..max_cols {
+            if old_chars.get(col) != new_chars.get(col) {
+                positions.push((row, col));
+            }
+        }
+    }
+
+    positions
+}
+
+fn generate_scramble_frame(
+    new_text: &str,
+    changed_positions: &[(usize, usize)],
+    resolve_times: &[u64],
+    elapsed_ms: u64,
+    frame_seed: u64,
+) -> String {
+    let mut lines: Vec<Vec<char>> = new_text.lines().map(|l| l.chars().collect()).collect();
+    if lines.is_empty() {
+        lines.push(Vec::new());
+    }
+
+    for (i, &(row, col)) in changed_positions.iter().enumerate() {
+        if elapsed_ms < resolve_times[i] {
+            if let Some(line) = lines.get_mut(row) {
+                if col < line.len() {
+                    let seed = frame_seed
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(i as u64 * 2654435761)
+                        .wrapping_add(elapsed_ms / 35);
+                    line[col] = pseudo_random_char(seed);
+                }
+            }
+        }
+    }
+
+    lines
+        .iter()
+        .map(|l| l.iter().collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn pseudo_random_char(seed: u64) -> char {
+    const CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
+    let h = seed
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
+    CHARS[((h >> 33) as usize) % CHARS.len()] as char
 }

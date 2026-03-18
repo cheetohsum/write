@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="feather" x1="0.8" y1="0" x2="0.2" y2="1">
+      <stop offset="0%" stop-color="#FAF5EB"/>
+      <stop offset="45%" stop-color="#EBDEC8"/>
+      <stop offset="100%" stop-color="#C4A661"/>
+    </linearGradient>
+    <linearGradient id="fire" x1="0.5" y1="1" x2="0.5" y2="0">
+      <stop offset="0%" stop-color="#B76040"/>
+      <stop offset="60%" stop-color="#C4A661"/>
+      <stop offset="100%" stop-color="#FAF5EB" stop-opacity="0.8"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.35" cy="0.75">
+      <stop offset="0%" stop-color="#C4A661" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#C4A661" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="softglow">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="96" fill="#3E2F24"/>
+
+  <!-- Subtle texture lines (Wright prairie-style horizontals) -->
+  <line x1="48" y1="96" x2="464" y2="96" stroke="#4A3A2E" stroke-width="0.75"/>
+  <line x1="48" y1="416" x2="464" y2="416" stroke="#4A3A2E" stroke-width="0.75"/>
+
+  <!-- Warm glow behind nib -->
+  <circle cx="155" cy="385" r="100" fill="url(#glow)"/>
+
+  <!-- Ink stroke — flowing calligraphic line -->
+  <path d="M148 398
+           C128 405 108 400 88 408
+           Q72 415 60 410"
+        stroke="#B76040" stroke-width="5" fill="none" stroke-linecap="round" opacity="0.9"/>
+  <!-- Ink trail dots -->
+  <circle cx="55" cy="412" r="3" fill="#B76040" opacity="0.5"/>
+  <circle cx="46" cy="416" r="1.8" fill="#B76040" opacity="0.3"/>
+
+  <!-- Quill feather — main body sweeping from bottom-left to top-right -->
+  <path d="M152 395
+           Q210 320 290 220
+           Q340 160 395 108
+           Q420 82 440 72
+           Q432 100 415 135
+           Q380 200 320 280
+           Q260 350 210 390
+           Q180 410 152 395Z"
+        fill="url(#feather)" opacity="0.95"/>
+
+  <!-- Feather rachis (spine) -->
+  <path d="M155 393 Q290 250 435 75"
+        stroke="#C4A661" stroke-width="2" fill="none" opacity="0.7"/>
+
+  <!-- Left barbs -->
+  <path d="M200 340 Q230 305 265 290" stroke="#EBDEC8" stroke-width="1" fill="none" opacity="0.5"/>
+  <path d="M230 305 Q260 270 295 255" stroke="#EBDEC8" stroke-width="1" fill="none" opacity="0.5"/>
+  <path d="M265 265 Q295 230 325 218" stroke="#EBDEC8" stroke-width="1" fill="none" opacity="0.5"/>
+  <path d="M295 230 Q325 195 355 185" stroke="#EBDEC8" stroke-width="1" fill="none" opacity="0.4"/>
+  <path d="M330 195 Q355 165 380 155" stroke="#EBDEC8" stroke-width="1" fill="none" opacity="0.4"/>
+  <path d="M360 160 Q380 135 405 122" stroke="#EBDEC8" stroke-width="1" fill="none" opacity="0.3"/>
+
+  <!-- Right barbs (shorter) -->
+  <path d="M210 370 Q195 350 200 330" stroke="#EBDEC8" stroke-width="0.8" fill="none" opacity="0.4"/>
+  <path d="M250 330 Q235 310 240 295" stroke="#EBDEC8" stroke-width="0.8" fill="none" opacity="0.4"/>
+  <path d="M290 290 Q275 270 280 255" stroke="#EBDEC8" stroke-width="0.8" fill="none" opacity="0.3"/>
+  <path d="M330 250 Q315 230 320 215" stroke="#EBDEC8" stroke-width="0.8" fill="none" opacity="0.3"/>
+
+  <!-- Fire / luminous glow at pen tip -->
+  <path d="M152 395
+           Q138 370 148 350
+           Q155 362 160 352
+           Q165 372 152 395Z"
+        fill="url(#fire)" filter="url(#softglow)" opacity="0.85"/>
+
+  <!-- Sparkle particles near nib -->
+  <circle cx="135" cy="362" r="2.5" fill="#C4A661" opacity="0.9"/>
+  <circle cx="145" cy="342" r="1.8" fill="#FAF5EB" opacity="0.7"/>
+  <circle cx="128" cy="378" r="1.5" fill="#C4A661" opacity="0.6"/>
+  <circle cx="162" cy="338" r="1.2" fill="#FAF5EB" opacity="0.5"/>
+  <circle cx="120" cy="358" r="1" fill="#C4A661" opacity="0.4"/>
+
+  <!-- Wright-style geometric corner accents -->
+  <g opacity="0.35">
+    <!-- Top-left -->
+    <rect x="40" y="40" width="28" height="3.5" rx="1.5" fill="#C4A661"/>
+    <rect x="40" y="40" width="3.5" height="28" rx="1.5" fill="#C4A661"/>
+    <rect x="40" y="50" width="16" height="2" rx="1" fill="#7E6958"/>
+    <!-- Bottom-right -->
+    <rect x="444" y="468" width="28" height="3.5" rx="1.5" fill="#C4A661"/>
+    <rect x="468" y="444" width="3.5" height="28" rx="1.5" fill="#C4A661"/>
+    <rect x="456" y="460" width="16" height="2" rx="1" fill="#7E6958"/>
+    <!-- Top-right -->
+    <rect x="444" y="40" width="28" height="3.5" rx="1.5" fill="#C4A661"/>
+    <rect x="468" y="40" width="3.5" height="28" rx="1.5" fill="#C4A661"/>
+    <!-- Bottom-left -->
+    <rect x="40" y="468" width="28" height="3.5" rx="1.5" fill="#C4A661"/>
+    <rect x="40" y="444" width="3.5" height="28" rx="1.5" fill="#C4A661"/>
+  </g>
+</svg>

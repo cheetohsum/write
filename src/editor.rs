@@ -8,6 +8,7 @@ pub struct EditorState<'a> {
     pub textarea: TextArea<'a>,
     pub last_sent_hash: String,
     pub modified: bool,
+    pub wrap_width: u16,
 }
 
 impl<'a> EditorState<'a> {
@@ -30,6 +31,7 @@ impl<'a> EditorState<'a> {
             textarea,
             last_sent_hash: String::new(),
             modified: false,
+            wrap_width: 80,
         }
     }
 
@@ -48,6 +50,40 @@ impl<'a> EditorState<'a> {
     pub fn handle_key(&mut self, key: KeyEvent) {
         self.textarea.input(key);
         self.modified = true;
+        self.wrap_current_line();
+    }
+
+    fn wrap_current_line(&mut self) {
+        let max = self.wrap_width as usize;
+        if max == 0 {
+            return;
+        }
+
+        let (row, _col) = self.textarea.cursor();
+        let line = match self.textarea.lines().get(row) {
+            Some(l) => l.clone(),
+            None => return,
+        };
+
+        if line.len() <= max {
+            return;
+        }
+
+        // Find the last space at or before max
+        let break_at = match line[..max].rfind(' ') {
+            Some(pos) => pos,
+            None => return, // single long word, don't break
+        };
+
+        // Move cursor to the break position
+        self.textarea.move_cursor(CursorMove::Head);
+        for _ in 0..break_at {
+            self.textarea.move_cursor(CursorMove::Forward);
+        }
+
+        // Delete the space and insert a newline
+        self.textarea.delete_next_char();
+        self.textarea.insert_newline();
     }
 
     pub fn replace_content(&mut self, new_text: &str) {

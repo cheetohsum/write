@@ -36,14 +36,75 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Convert SVG to ICO (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          magick assets/icon.svg -define icon:auto-resize=256,128,64,48,32,16 assets/icon.ico
+
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Upload artifact
+      - name: Create macOS .app bundle
+        if: runner.os == 'macOS'
+        run: |
+          APP="Write.app"
+          mkdir -p "$APP/Contents/MacOS"
+          mkdir -p "$APP/Contents/Resources"
+          cp "target/${{ matrix.target }}/release/Write" "$APP/Contents/MacOS/write-bin"
+          # Launcher script that opens Terminal with Write
+          cat > "$APP/Contents/MacOS/Write" << 'LAUNCHER'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          osascript -e "tell app \"Terminal\" to do script \"'${DIR}/write-bin'; exit\""
+          LAUNCHER
+          chmod +x "$APP/Contents/MacOS/Write"
+          # Info.plist
+          cat > "$APP/Contents/Info.plist" << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key>
+              <string>Write</string>
+              <key>CFBundleDisplayName</key>
+              <string>Write</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.write.app</string>
+              <key>CFBundleVersion</key>
+              <string>1.0</string>
+              <key>CFBundleExecutable</key>
+              <string>Write</string>
+              <key>CFBundleIconFile</key>
+              <string>icon</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+          </dict>
+          </plist>
+          PLIST
+          # Convert SVG to ICNS for macOS
+          mkdir -p icon.iconset
+          for size in 16 32 64 128 256 512; do
+            sips -s format png -z $size $size assets/icon.svg --out "icon.iconset/icon_${size}x${size}.png" 2>/dev/null || true
+            double=$((size * 2))
+            sips -s format png -z $double $double assets/icon.svg --out "icon.iconset/icon_${size}x${size}@2x.png" 2>/dev/null || true
+          done
+          iconutil -c icns icon.iconset -o "$APP/Contents/Resources/icon.icns" 2>/dev/null || true
+          zip -r "${{ matrix.asset_name }}.zip" "$APP"
+
+      - name: Upload artifact (Windows)
+        if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
           path: target/${{ matrix.target }}/release/${{ matrix.binary }}
+
+      - name: Upload artifact (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}.zip
 
   release:
     needs: build
@@ -60,18 +121,18 @@ jobs:
           mv artifacts/Write-windows-x86_64.exe/Write.exe artifacts/Write-windows-x86_64.exe.tmp
           rm -rf artifacts/Write-windows-x86_64.exe
           mv artifacts/Write-windows-x86_64.exe.tmp artifacts/Write-windows-x86_64.exe
-          mv artifacts/Write-macos-aarch64/Write artifacts/Write-macos-aarch64.tmp
+          mv artifacts/Write-macos-aarch64/Write-macos-aarch64.zip artifacts/Write-macos-aarch64.zip.tmp
           rm -rf artifacts/Write-macos-aarch64
-          mv artifacts/Write-macos-aarch64.tmp artifacts/Write-macos-aarch64
-          mv artifacts/Write-macos-x86_64/Write artifacts/Write-macos-x86_64.tmp
+          mv artifacts/Write-macos-aarch64.zip.tmp artifacts/Write-macos-aarch64.zip
+          mv artifacts/Write-macos-x86_64/Write-macos-x86_64.zip artifacts/Write-macos-x86_64.zip.tmp
           rm -rf artifacts/Write-macos-x86_64
-          mv artifacts/Write-macos-x86_64.tmp artifacts/Write-macos-x86_64
+          mv artifacts/Write-macos-x86_64.zip.tmp artifacts/Write-macos-x86_64.zip
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             artifacts/Write-windows-x86_64.exe
-            artifacts/Write-macos-aarch64
-            artifacts/Write-macos-x86_64
+            artifacts/Write-macos-aarch64.zip
+            artifacts/Write-macos-x86_64.zip
           generate_release_notes: true
