@@ -7,6 +7,6 @@ fn main() {
         }
         res.set("ProductName", "Write");
         res.set("FileDescription", "Write - Distraction-free terminal editor");
-        let _ = res.compile();
+        res.compile().expect("Failed to compile Windows resources — icon may not be embedded");
     }
 }

@@ -1,7 +1,11 @@
 /// Platform-specific setup for standalone window mode.
 ///
-/// On Windows: allocates a console (release) or reuses existing (debug),
-/// sets the window title, icon, size, and centers it on screen.
+/// On Windows release builds: `windows_subsystem = "windows"` suppresses
+/// the default console. We relaunch through `conhost.exe` to get a dedicated
+/// console window with our custom icon (bypasses Windows Terminal, which would
+/// override our icon and title bar). Falls back to `AllocConsole` if that fails.
+///
+/// On Windows debug builds: reuses the existing terminal, sets title and icon.
 /// On other platforms: no-op.
 
 #[cfg(windows)]
@@ -19,30 +23,35 @@ mod windows_setup {
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GetSystemMetrics, SetWindowPos, SendMessageW, LoadImageW,
+        SetForegroundWindow,
         SM_CXSCREEN, SM_CYSCREEN,
         SWP_NOZORDER, SWP_NOACTIVATE, SWP_NOSIZE,
         WM_SETICON, ICON_BIG, ICON_SMALL,
-        IMAGE_ICON, LR_DEFAULTSIZE,
+        IMAGE_ICON,
         GetWindowRect,
     };
 
-    /// Resource ID for the icon embedded by winresource in build.rs.
-    /// MAKEINTRESOURCE(1) = 1 as usize cast to pointer.
-    const ICON_RESOURCE_ID: u16 = 1;
-
-    /// Check if a HANDLE value is invalid (null or INVALID_HANDLE_VALUE).
     fn is_invalid_handle(h: *mut core::ffi::c_void) -> bool {
         h.is_null() || h == -1_isize as *mut _
     }
 
     pub fn setup() {
-        let existing_console = unsafe { GetConsoleWindow() };
+        let existing = unsafe { GetConsoleWindow() };
 
-        if existing_console.is_null() {
-            // Release mode with windows_subsystem = "windows": no console exists
-            unsafe {
-                if AllocConsole() == 0 {
-                    return;
+        if existing.is_null() {
+            // No console — release mode with windows_subsystem = "windows".
+            // Relaunch through conhost.exe for a standalone window with our icon.
+            // Without this, Win11 routes AllocConsole through Windows Terminal,
+            // which ignores our WM_SETICON calls.
+            if std::env::var("_WRITE_CONHOST").is_err() {
+                if relaunch_via_conhost() {
+                    std::process::exit(0);
+                }
+            }
+            // Relaunched or relaunch failed — ensure we have a console
+            if unsafe { GetConsoleWindow() }.is_null() {
+                unsafe {
+                    AllocConsole();
                 }
             }
         }
@@ -52,6 +61,33 @@ mod windows_setup {
         configure_console_font();
         set_window_size(120, 35);
         center_window();
+
+        // Ensure window is brought to front
+        let hwnd = unsafe { GetConsoleWindow() };
+        if !hwnd.is_null() {
+            unsafe {
+                SetForegroundWindow(hwnd);
+            }
+        }
+    }
+
+    /// Relaunch through conhost.exe to bypass Windows Terminal and get
+    /// a dedicated console window where we can set our own icon.
+    fn relaunch_via_conhost() -> bool {
+        let exe = match std::env::current_exe() {
+            Ok(p) => p,
+            Err(_) => return false,
+        };
+
+        let args: Vec<String> = std::env::args().skip(1).collect();
+
+        std::process::Command::new("conhost.exe")
+            .arg("--")
+            .arg(&exe)
+            .args(&args)
+            .env("_WRITE_CONHOST", "1")
+            .spawn()
+            .is_ok()
     }
 
     fn set_title() {
@@ -72,26 +108,23 @@ mod windows_setup {
             return;
         }
 
-        // Load the icon from the embedded resource (ID 1, set by winresource).
-        // MAKEINTRESOURCE(id) = id as usize as *const u16
-        let hicon = unsafe {
-            LoadImageW(
-                hmodule,
-                ICON_RESOURCE_ID as usize as *const u16,
-                IMAGE_ICON,
-                0,
-                0,
-                LR_DEFAULTSIZE,
-            )
-        };
+        // MAKEINTRESOURCE(1) — icon resource ID set by winresource in build.rs
+        let res_id = 1usize as *const u16;
 
-        if hicon.is_null() {
-            return;
+        // Load big icon (for title bar and alt-tab)
+        let hicon_big = unsafe { LoadImageW(hmodule, res_id, IMAGE_ICON, 32, 32, 0) };
+        // Load small icon (for window corner and taskbar)
+        let hicon_small = unsafe { LoadImageW(hmodule, res_id, IMAGE_ICON, 16, 16, 0) };
+
+        if !hicon_big.is_null() {
+            unsafe {
+                SendMessageW(hwnd, WM_SETICON, ICON_BIG as usize, hicon_big as isize);
+            }
         }
-
-        unsafe {
-            SendMessageW(hwnd, WM_SETICON, ICON_BIG as usize, hicon as isize);
-            SendMessageW(hwnd, WM_SETICON, ICON_SMALL as usize, hicon as isize);
+        if !hicon_small.is_null() {
+            unsafe {
+                SendMessageW(hwnd, WM_SETICON, ICON_SMALL as usize, hicon_small as isize);
+            }
         }
     }
 
