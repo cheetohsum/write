@@ -9,136 +9,155 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            binary: Write.exe
-            asset_name: Write-windows-x86_64.exe
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            binary: Write
-            asset_name: Write-macos-aarch64
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            binary: Write
-            asset_name: Write-macos-x86_64
-
-    runs-on: ${{ matrix.os }}
-
+  build-windows:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-pc-windows-msvc
 
-      - name: Convert SVG to ICO (Windows)
-        if: runner.os == 'Windows'
+      - name: Convert SVG to ICO
         shell: bash
-        run: |
-          magick assets/icon.svg -define icon:auto-resize=256,128,64,48,32,16 assets/icon.ico
+        run: magick assets/icon.svg -define icon:auto-resize=256,128,64,48,32,16 assets/icon.ico
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target x86_64-pc-windows-msvc
 
-      - name: Create macOS .app bundle
-        if: runner.os == 'macOS'
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist/Write
+          cp target/x86_64-pc-windows-msvc/release/Write.exe dist/Write/
+          cp .env.example dist/Write/
+          cp README.md dist/Write/
+          cp assets/icon.ico dist/Write/
+          cd dist && 7z a -tzip ../Write-windows-x86_64.zip Write/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Write-windows-x86_64
+          path: Write-windows-x86_64.zip
+
+  build-macos-arm:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Build
+        run: cargo build --release --target aarch64-apple-darwin
+
+      - name: Create .app bundle
         run: |
           APP="Write.app"
           mkdir -p "$APP/Contents/MacOS"
           mkdir -p "$APP/Contents/Resources"
-          cp "target/${{ matrix.target }}/release/Write" "$APP/Contents/MacOS/write-bin"
-          # Launcher script that opens Terminal with Write
-          cat > "$APP/Contents/MacOS/Write" << 'LAUNCHER'
-          #!/bin/bash
-          DIR="$(cd "$(dirname "$0")" && pwd)"
-          osascript -e "tell app \"Terminal\" to do script \"'${DIR}/write-bin'; exit\""
-          LAUNCHER
+          cp "target/aarch64-apple-darwin/release/Write" "$APP/Contents/MacOS/write-bin"
+          chmod +x "$APP/Contents/MacOS/write-bin"
+          printf '#!/bin/bash\nDIR="$(cd "$(dirname "$0")" && pwd)"\nif [ -t 0 ] && [ -t 1 ]; then\n  exec "$DIR/write-bin"\nelse\n  open -a Terminal "$DIR/write-bin"\nfi\n' > "$APP/Contents/MacOS/Write"
           chmod +x "$APP/Contents/MacOS/Write"
-          # Info.plist
-          cat > "$APP/Contents/Info.plist" << 'PLIST'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleName</key>
-              <string>Write</string>
-              <key>CFBundleDisplayName</key>
-              <string>Write</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.write.app</string>
-              <key>CFBundleVersion</key>
-              <string>1.0</string>
-              <key>CFBundleExecutable</key>
-              <string>Write</string>
-              <key>CFBundleIconFile</key>
-              <string>icon</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-          </dict>
-          </plist>
-          PLIST
-          # Convert SVG to ICNS for macOS
+          printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n<key>CFBundleName</key><string>Write</string>\n<key>CFBundleDisplayName</key><string>Write</string>\n<key>CFBundleIdentifier</key><string>com.write.app</string>\n<key>CFBundleVersion</key><string>1.0</string>\n<key>CFBundleShortVersionString</key><string>1.0</string>\n<key>CFBundleExecutable</key><string>Write</string>\n<key>CFBundleIconFile</key><string>icon</string>\n<key>CFBundlePackageType</key><string>APPL</string>\n<key>LSMinimumSystemVersion</key><string>11.0</string>\n</dict>\n</plist>\n' > "$APP/Contents/Info.plist"
           mkdir -p icon.iconset
-          for size in 16 32 64 128 256 512; do
-            sips -s format png -z $size $size assets/icon.svg --out "icon.iconset/icon_${size}x${size}.png" 2>/dev/null || true
-            double=$((size * 2))
-            sips -s format png -z $double $double assets/icon.svg --out "icon.iconset/icon_${size}x${size}@2x.png" 2>/dev/null || true
+          for size in 16 32 128 256 512; do
+            sips -z $size $size assets/icon.png --out "icon.iconset/icon_${size}x${size}.png"
           done
-          iconutil -c icns icon.iconset -o "$APP/Contents/Resources/icon.icns" 2>/dev/null || true
-          zip -r "${{ matrix.asset_name }}.zip" "$APP"
+          for size in 16 32 128 256; do
+            double=$((size * 2))
+            sips -z $double $double assets/icon.png --out "icon.iconset/icon_${size}x${size}@2x.png"
+          done
+          iconutil -c icns icon.iconset -o "$APP/Contents/Resources/icon.icns"
+          cp .env.example "$APP/Contents/Resources/"
 
-      - name: Upload artifact (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.asset_name }}
-          path: target/${{ matrix.target }}/release/${{ matrix.binary }}
+      - name: Create DMG
+        run: |
+          mkdir -p dmg_staging
+          cp -r Write.app dmg_staging/
+          ln -s /Applications dmg_staging/Applications
+          hdiutil create -volname "Write" -srcfolder dmg_staging -ov -format UDZO Write-macos-aarch64.dmg
 
-      - name: Upload artifact (macOS)
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset_name }}
-          path: ${{ matrix.asset_name }}.zip
+          name: Write-macos-aarch64
+          path: Write-macos-aarch64.dmg
+
+  build-macos-intel:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+
+      - name: Build
+        run: cargo build --release --target x86_64-apple-darwin
+
+      - name: Create .app bundle
+        run: |
+          APP="Write.app"
+          mkdir -p "$APP/Contents/MacOS"
+          mkdir -p "$APP/Contents/Resources"
+          cp "target/x86_64-apple-darwin/release/Write" "$APP/Contents/MacOS/write-bin"
+          chmod +x "$APP/Contents/MacOS/write-bin"
+          printf '#!/bin/bash\nDIR="$(cd "$(dirname "$0")" && pwd)"\nif [ -t 0 ] && [ -t 1 ]; then\n  exec "$DIR/write-bin"\nelse\n  open -a Terminal "$DIR/write-bin"\nfi\n' > "$APP/Contents/MacOS/Write"
+          chmod +x "$APP/Contents/MacOS/Write"
+          printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n<key>CFBundleName</key><string>Write</string>\n<key>CFBundleDisplayName</key><string>Write</string>\n<key>CFBundleIdentifier</key><string>com.write.app</string>\n<key>CFBundleVersion</key><string>1.0</string>\n<key>CFBundleShortVersionString</key><string>1.0</string>\n<key>CFBundleExecutable</key><string>Write</string>\n<key>CFBundleIconFile</key><string>icon</string>\n<key>CFBundlePackageType</key><string>APPL</string>\n<key>LSMinimumSystemVersion</key><string>11.0</string>\n</dict>\n</plist>\n' > "$APP/Contents/Info.plist"
+          mkdir -p icon.iconset
+          for size in 16 32 128 256 512; do
+            sips -z $size $size assets/icon.png --out "icon.iconset/icon_${size}x${size}.png"
+          done
+          for size in 16 32 128 256; do
+            double=$((size * 2))
+            sips -z $double $double assets/icon.png --out "icon.iconset/icon_${size}x${size}@2x.png"
+          done
+          iconutil -c icns icon.iconset -o "$APP/Contents/Resources/icon.icns"
+          cp .env.example "$APP/Contents/Resources/"
+
+      - name: Create DMG
+        run: |
+          mkdir -p dmg_staging
+          cp -r Write.app dmg_staging/
+          ln -s /Applications dmg_staging/Applications
+          hdiutil create -volname "Write" -srcfolder dmg_staging -ov -format UDZO Write-macos-x86_64.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Write-macos-x86_64
+          path: Write-macos-x86_64.dmg
 
   release:
-    needs: build
+    needs: [build-windows, build-macos-arm, build-macos-intel]
     runs-on: ubuntu-latest
-
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: artifacts
-
-      - name: Prepare release assets
-        run: |
-          mv artifacts/Write-windows-x86_64.exe/Write.exe artifacts/Write-windows-x86_64.exe.tmp
-          rm -rf artifacts/Write-windows-x86_64.exe
-          mv artifacts/Write-windows-x86_64.exe.tmp artifacts/Write-windows-x86_64.exe
-          mv artifacts/Write-macos-aarch64/Write-macos-aarch64.zip artifacts/Write-macos-aarch64.zip.tmp
-          rm -rf artifacts/Write-macos-aarch64
-          mv artifacts/Write-macos-aarch64.zip.tmp artifacts/Write-macos-aarch64.zip
-          mv artifacts/Write-macos-x86_64/Write-macos-x86_64.zip artifacts/Write-macos-x86_64.zip.tmp
-          rm -rf artifacts/Write-macos-x86_64
-          mv artifacts/Write-macos-x86_64.zip.tmp artifacts/Write-macos-x86_64.zip
 
       - uses: actions/checkout@v4
         with:
           sparse-checkout: assets
 
+      - name: Prepare assets
+        run: |
+          mv artifacts/Write-windows-x86_64/Write-windows-x86_64.zip ./
+          mv artifacts/Write-macos-aarch64/Write-macos-aarch64.dmg ./
+          mv artifacts/Write-macos-x86_64/Write-macos-x86_64.dmg ./
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/Write-windows-x86_64.exe
-            artifacts/Write-macos-aarch64.zip
-            artifacts/Write-macos-x86_64.zip
+            Write-windows-x86_64.zip
+            Write-macos-aarch64.dmg
+            Write-macos-x86_64.dmg
             assets/icon.png
             assets/icon.ico
           generate_release_notes: true
