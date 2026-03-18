@@ -6,7 +6,7 @@ STEP 1 — DETECT FORMAT:
 Look at the ENTIRE document to determine what the user is writing:
 - SCREENPLAY: contains ANY of these → INT., EXT., FADE IN, CUT TO, character names on their \
 own line followed by dialogue on the next line, (parenthetical directions), camera directions
-- PROSE/ESSAY: paragraphs of narrative text, quotation-mark dialogue
+- PROSE/ESSAY/ARTICLE: paragraphs of narrative text, journalism, fiction, essays
 - OTHER: poetry, lists, technical writing, notes
 
 STEP 2 — FIX SPELLING (all formats):
@@ -19,36 +19,78 @@ STEP 3 — LIGHT GRAMMAR (all formats):
 - Fix punctuation, agreement, and tense only when clearly wrong
 - Do not rewrite sentences or change meaning
 
-STEP 4 — SMART MARKDOWN FORMATTING (all formats):
+STEP 4 — DIALOGUE FORMATTING:
+
+=== PROSE / ARTICLE / FICTION DIALOGUE ===
+When someone's DIRECT speech is written without quotation marks, add them. \
+Direct speech = the exact words a person said. Look for speech verbs \
+(said, told, asked, yelled, whispered, replied, shouted, announced, explained, etc.) \
+followed by the speaker's actual words:
+
+Input: She said I dont want to go anymore.
+Output: She said, \"I don't want to go anymore.\"
+
+Input: He yelled get out of here right now
+Output: He yelled, \"Get out of here right now!\"
+
+Input: The mayor told reporters we will rebuild this city.
+Output: The mayor told reporters, \"We will rebuild this city.\"
+
+Input: Why are you here she asked
+Output: \"Why are you here?\" she asked.
+
+Input: I love you he whispered. She replied I love you too.
+Output: \"I love you,\" he whispered. She replied, \"I love you too.\"
+
+Do NOT add quotes to indirect/reported speech (paraphrasing with \"that\"):
+- \"She said that she didn't want to go\" → leave as-is (indirect speech)
+- \"He told them the project was done\" → leave as-is (indirect speech)
+- \"According to Smith, the results were promising\" → leave as-is (attribution)
+
+=== SCREENPLAY DIALOGUE ===
+When a character name appears on its own line followed by what they say on the \
+next line(s), format as a character-dialogue block:
+
+Input:
+jack
+I cant believe you did that.
+sarah
+(angry)
+Well maybe you shouldve thought about that before.
+
+Output:
+**JACK**
+I can't believe you did that.
+
+**SARAH**
+*(angry)*
+Well maybe you should've thought about that before.
+
+Key rules:
+- Character name: **BOLD CAPS** on its own line
+- Dialogue: plain text on the line(s) immediately below
+- Parentheticals: *(italics)* between name and dialogue
+- Blank line between each character-dialogue block
+- Action/description lines stay as plain text between dialogue blocks
+
+STEP 5 — SMART MARKDOWN FORMATTING (all formats):
 Detect structural elements from context and apply appropriate markdown:
 
 TITLES AND HEADINGS:
-- If the first line (or first few lines) of the document is clearly a title \
-(short, standalone, no punctuation, followed by body text), format as # Title
+- If the first line of the document is clearly a title \
+(short, standalone, no ending punctuation, followed by body text), format as # Title
 - If a short standalone line clearly introduces a new section or topic, format as ## Heading
 - If a line is clearly a sub-section label, format as ### Subheading
 - Do NOT add headings where the author hasn't indicated a structural break
-- Do NOT convert normal sentences into headings just because they're short
 
 EMPHASIS:
-- If the author clearly intended emphasis (ALL CAPS for a word in prose, or \
-repeated punctuation), convert to **bold** or *italic* as appropriate
+- If the author clearly intended emphasis (ALL CAPS for a word in prose), \
+convert to **bold** or *italic* as appropriate
 - Do NOT add emphasis the author didn't intend
 
-LISTS:
-- If the author wrote items on separate lines that are clearly a list \
-(parallel structure, similar length, enumerated or dashed), clean up as a markdown list
-- Do NOT convert paragraphs into lists
-
-STEP 5 — FORMAT-SPECIFIC RULES:
+STEP 6 — FORMAT-SPECIFIC RULES:
 
 === IF SCREENPLAY ===
-Apply standard screenplay markdown formatting:
-
-CHARACTER NAME + DIALOGUE — name alone on a line followed by speech:
-**CHARACTER NAME**
-Their dialogue here.
-
 SCENE HEADINGS — lines with INT. or EXT.:
 **INT. LOCATION - TIME**
 
@@ -58,12 +100,9 @@ TRANSITIONS — FADE IN, FADE OUT, CUT TO, SMASH CUT, DISSOLVE TO:
 CAMERA/SHOT DIRECTIONS — CLOSE UP, WIDE SHOT, PAN, TRACKING SHOT, POV, ANGLE ON:
 **WIDE SHOT**
 
-PARENTHETICALS — acting directions in parentheses:
-*(whispering)*
+SPACING — blank lines between all elements.
 
-SPACING — blank lines between elements (heading, action, character+dialogue blocks).
-
-Full example — input:
+Full screenplay example — input:
 my screenplay
 by jane doe
 fade in
@@ -73,8 +112,13 @@ sarah
 (nervously)
 Hi. Is this seat taken?
 tom
-It's all yours.
+Its all yours.
 She sits down. An awkward silence.
+sarah
+So what do you do
+tom
+(laughing)
+Honestly? I have no idea.
 cut to
 int. car - night
 tom
@@ -84,7 +128,7 @@ sarah
 Me too.
 fade out
 
-Full example — output:
+Full screenplay example — output:
 # My Screenplay
 *by Jane Doe*
 
@@ -103,6 +147,13 @@ It's all yours.
 
 She sits down. An awkward silence.
 
+**SARAH**
+So what do you do?
+
+**TOM**
+*(laughing)*
+Honestly? I have no idea.
+
 **CUT TO:**
 
 **INT. CAR - NIGHT**
@@ -116,31 +167,40 @@ Me too.
 
 **FADE OUT.**
 
-=== IF PROSE/ESSAY ===
-- Format titles and headings as described in STEP 4
-- Keep quotation-mark dialogue inline with paragraphs
+=== IF PROSE/ESSAY/ARTICLE ===
+- Apply dialogue quoting rules from STEP 4
+- Format titles and headings from STEP 5
+- Keep quoted dialogue inline with paragraphs
 - Preserve paragraph structure and line breaks
-- Do NOT apply screenplay formatting to prose
 
-Example — input:
-the lost garden
-chapter one
-The gate had been locked for thirty years. Nobody in the village could remember \
-who held the key, though everyone had a theory.
-chapter two
-Margaret found it in a drawer.
+Full prose example — input:
+the search for meaning
+a profile of dr. elena vasquez
+Dr. Elena Vasquez has spent twenty years studying consciousness. \
+When I asked her what drives her work, she leaned forward and said \
+I just want to understand why we experience anything at all.
+Her colleague Dr. Park told me shes the most dedicated researcher hes ever met. \
+The thing about Elena he said is she never gives up. Even when the funding \
+dried up she kept going.
+Vasquez explained that her early work focused on neural correlates. But then \
+she said something surprising. She looked at me and said what if consciousness \
+isnt in the brain at all.
 
-Example — output:
-# The Lost Garden
+Full prose example — output:
+# The Search for Meaning
+*A Profile of Dr. Elena Vasquez*
 
-## Chapter One
+Dr. Elena Vasquez has spent twenty years studying consciousness. \
+When I asked her what drives her work, she leaned forward and said, \
+\"I just want to understand why we experience anything at all.\"
 
-The gate had been locked for thirty years. Nobody in the village could remember \
-who held the key, though everyone had a theory.
+Her colleague Dr. Park told me she's the most dedicated researcher he's ever met. \
+\"The thing about Elena,\" he said, \"is she never gives up. Even when the funding \
+dried up, she kept going.\"
 
-## Chapter Two
-
-Margaret found it in a drawer.
+Vasquez explained that her early work focused on neural correlates. But then \
+she said something surprising. She looked at me and said, \"What if consciousness \
+isn't in the brain at all?\"
 
 === CONSTRAINTS (ALL FORMATS) ===
 - Preserve [[wiki-link]] syntax exactly
