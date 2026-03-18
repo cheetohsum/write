@@ -436,6 +436,91 @@ fn render_settings(f: &mut Frame, state: &mut AppState, area: Rect) {
         ])),
         form_chunks[16],
     );
+
+    // Model dropdown overlay — shown when model field is active and models are loaded
+    if state.settings_field == 3 && !state.openrouter_models.is_empty() {
+        let visible_count: u16 = 7;
+        let dropdown_y = form_chunks[13].bottom();
+        let dropdown_x = form_chunks[13].left();
+        let dropdown_w = form_chunks[13].width;
+        let max_h = area.height.saturating_sub(dropdown_y);
+        let dropdown_h = (visible_count + 2).min(max_h); // +2 for borders
+
+        if dropdown_h > 2 {
+            let dropdown_area = Rect::new(dropdown_x, dropdown_y, dropdown_w, dropdown_h);
+            f.render_widget(Clear, dropdown_area);
+
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(theme::GOLD).bg(theme::PARCHMENT))
+                .style(theme::base());
+            f.render_widget(block, dropdown_area);
+
+            let inner = dropdown_area.inner(Margin::new(1, 1));
+            let total = state.openrouter_models.len();
+            let visible = inner.height as usize;
+            let selected = state.model_selected;
+
+            // Keep selection centered in the visible window
+            let scroll_start = if total <= visible {
+                0
+            } else if selected < visible / 2 {
+                0
+            } else if selected > total - (visible + 1) / 2 {
+                total.saturating_sub(visible)
+            } else {
+                selected.saturating_sub(visible / 2)
+            };
+
+            for row in 0..visible {
+                let model_idx = scroll_start + row;
+                if model_idx >= total {
+                    break;
+                }
+
+                let model = &state.openrouter_models[model_idx];
+                let is_sel = model_idx == selected;
+
+                let style = if is_sel {
+                    Style::default()
+                        .fg(theme::CREAM)
+                        .bg(theme::TERRACOTTA)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    theme::base()
+                };
+
+                let prefix = if is_sel { "▸ " } else { "  " };
+                let max_w = inner.width as usize;
+                let text = format!("{}{}", prefix, model);
+                let display = if text.len() > max_w {
+                    format!("{}…", &text[..max_w.saturating_sub(1)])
+                } else {
+                    text
+                };
+
+                let y = inner.top() + row as u16;
+                if y < inner.bottom() {
+                    f.render_widget(
+                        Paragraph::new(Span::styled(display, style)),
+                        Rect::new(inner.left(), y, inner.width, 1),
+                    );
+                }
+            }
+
+            // Scroll indicator
+            if total > visible {
+                let pct = selected as f64 / total as f64;
+                let bar_y = inner.top() + (pct * (inner.height.saturating_sub(1)) as f64) as u16;
+                if bar_y < inner.bottom() {
+                    let cell = &mut f.buffer_mut()[(dropdown_area.right() - 1, bar_y)];
+                    cell.set_char('█');
+                    cell.set_fg(theme::GOLD);
+                }
+            }
+        }
+    }
 }
 
 fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {

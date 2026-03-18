@@ -188,11 +188,15 @@ pub fn load_preferred_provider() -> Option<u8> {
 
 #[cfg(target_os = "windows")]
 pub fn pick_folder() -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    // Use Shell.Application COM object — reliable native dialog that works
+    // regardless of console/window state (unlike WinForms FolderBrowserDialog)
     let output = std::process::Command::new("powershell")
         .args([
-            "-NoProfile", "-WindowStyle", "Hidden", "-Command",
-            "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'Choose output directory'; $o = New-Object System.Windows.Forms.Form; $o.TopMost = $true; if($d.ShowDialog($o) -eq 'OK'){$d.SelectedPath}; $o.Dispose()",
+            "-NoProfile", "-Command",
+            "$f = (New-Object -ComObject Shell.Application).BrowseForFolder(0, 'Choose output directory', 0x50, 0); if($f){$f.Self.Path}",
         ])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW — hide powershell console
         .output()
         .ok()?;
     let path = String::from_utf8_lossy(&output.stdout).trim().to_string();

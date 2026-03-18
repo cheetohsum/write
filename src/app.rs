@@ -673,11 +673,16 @@ fn handle_settings_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
     let action = keybindings::map_settings_key(key);
     match action {
         Action::Confirm => {
-            // Set this provider as preferred (if it has a key)
             let idx = state.settings_field as usize;
-            let key_text = state.settings_inputs[idx].lines().join("");
-            if !key_text.trim().is_empty() {
-                state.preferred_provider = Some(state.settings_field);
+            if idx < 3 {
+                // Set this provider as preferred (if it has a key)
+                let key_text = state.settings_inputs[idx].lines().join("");
+                if !key_text.trim().is_empty() {
+                    state.preferred_provider = Some(state.settings_field);
+                    save_settings(state);
+                }
+            } else {
+                // Model field: just save
                 save_settings(state);
             }
         }
