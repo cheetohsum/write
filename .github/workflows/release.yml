@@ -137,17 +137,18 @@ jobs:
     needs: [build-windows, build-macos-arm, build-macos-intel]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
       - uses: actions/checkout@v4
         with:
           sparse-checkout: assets
 
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
       - name: Prepare assets
         run: |
-          find artifacts/ -type f -name '*.zip' -o -name '*.dmg' | while read f; do mv "$f" ./; done
+          ls -laR artifacts/
+          find artifacts/ -type f \( -name '*.zip' -o -name '*.dmg' \) -exec mv {} ./ \;
           ls -la *.zip *.dmg
 
       - name: Create Release
