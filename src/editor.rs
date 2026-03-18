@@ -129,12 +129,21 @@ impl<'a> EditorState<'a> {
     }
 
     pub fn set_content_with_cursor(&mut self, content: &str, row: usize, col: usize) {
+        // Pad content with empty lines if the cursor row exceeds the line count.
+        // The LLM may strip trailing empty lines, but the user's cursor might
+        // be on one of them (e.g. just pressed Enter to start a new line).
+        let mut padded = content.to_string();
+        let line_count = padded.split('\n').count();
+        for _ in line_count..=row {
+            padded.push('\n');
+        }
+
         self.textarea.select_all();
         self.textarea.cut();
-        self.textarea.insert_str(content);
+        self.textarea.insert_str(&padded);
 
-        let line_count = self.textarea.lines().len();
-        let target_row = row.min(line_count.saturating_sub(1));
+        let final_line_count = self.textarea.lines().len();
+        let target_row = row.min(final_line_count.saturating_sub(1));
         self.textarea.move_cursor(CursorMove::Top);
         self.textarea.move_cursor(CursorMove::Head);
 
