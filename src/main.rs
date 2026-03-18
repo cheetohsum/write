@@ -9,6 +9,7 @@ mod ui;
 use std::io;
 use std::panic;
 
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen, SetTitle};
 use crossterm::execute;
 use ratatui::backend::CrosstermBackend;
@@ -29,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
     // Set up terminal
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, SetTitle("Write"))?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture, SetTitle("Write"))?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
@@ -45,6 +46,6 @@ async fn main() -> anyhow::Result<()> {
 
 fn restore_terminal() -> anyhow::Result<()> {
     terminal::disable_raw_mode()?;
-    execute!(io::stdout(), LeaveAlternateScreen)?;
+    execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen)?;
     Ok(())
 }

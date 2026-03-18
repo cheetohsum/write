@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
+use tui_textarea::CursorMove;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
@@ -20,6 +21,7 @@ use crate::ui;
 const DEBOUNCE_IDLE_MS: u64 = 2000;
 const DEBOUNCE_WORD_MS: u64 = 800;
 const DEBOUNCE_SENTENCE_MS: u64 = 300;
+const DEBOUNCE_NEWLINE_MS: u64 = 400;
 const DEBOUNCE_RATE_LIMITED_MS: u64 = 8000;
 const ANIMATION_DURATION_MS: u64 = 200;
 const STARTUP_ANIM_MS: u64 = 900;
@@ -298,39 +300,51 @@ pub async fn run(
         };
 
         if event::poll(poll_duration)? {
-            if let Event::Key(key) = event::read()? {
-                if state.startup_anim.is_some() {
-                    if matches!(key.code, KeyCode::Esc)
-                        || matches!(
-                            (key.code, key.modifiers),
-                            (KeyCode::Char('q'), KeyModifiers::CONTROL)
-                        )
-                    {
-                        state.should_quit = true;
+            match event::read()? {
+                Event::Key(key) => {
+                    if state.startup_anim.is_some() {
+                        if matches!(key.code, KeyCode::Esc)
+                            || matches!(
+                                (key.code, key.modifiers),
+                                (KeyCode::Char('q'), KeyModifiers::CONTROL)
+                            )
+                        {
+                            state.should_quit = true;
+                        }
+                        if state.should_quit {
+                            break;
+                        }
+                        continue;
                     }
+
+                    if state.transition.is_some() {
+                        continue;
+                    }
+
+                    state.last_keypress = Instant::now();
+
+                    if let Some(anim) = state.animation.take() {
+                        state.editor.replace_content(&anim.new_text);
+                        state.editor.last_sent_hash = llm::content_hash(&anim.new_text);
+                        state.llm_status = LlmStatus::Applied;
+                    }
+
+                    handle_key(&mut state, key)?;
+
                     if state.should_quit {
                         break;
                     }
-                    continue;
                 }
-
-                if state.transition.is_some() {
-                    continue;
+                Event::Mouse(mouse) => {
+                    // Forward mouse clicks to textarea for cursor positioning
+                    if state.screen == Screen::Editor
+                        && state.transition.is_none()
+                        && matches!(mouse.kind, MouseEventKind::Down(_))
+                    {
+                        state.editor.textarea.input(Event::Mouse(mouse));
+                    }
                 }
-
-                state.last_keypress = Instant::now();
-
-                if let Some(anim) = state.animation.take() {
-                    state.editor.replace_content(&anim.new_text);
-                    state.editor.last_sent_hash = llm::content_hash(&anim.new_text);
-                    state.llm_status = LlmStatus::Applied;
-                }
-
-                handle_key(&mut state, key)?;
-
-                if state.should_quit {
-                    break;
-                }
+                _ => {}
             }
         }
     }
@@ -428,9 +442,19 @@ fn handle_editor_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
             navigate_into_link(state)?;
         }
         Action::ForwardToEditor(key_event) => {
-            state.editor.handle_key(key_event);
+            // Down arrow: move down then jump to end of that line
+            if matches!(key_event.code, KeyCode::Down) {
+                state.editor.textarea.input(key_event);
+                state.editor.textarea.move_cursor(CursorMove::End);
+            } else {
+                state.editor.handle_key(key_event);
+            }
 
-            if matches!(key_event.code, KeyCode::Char(' ')) {
+            // Set debounce urgency based on what was typed
+            if matches!(key_event.code, KeyCode::Enter) {
+                // Newline = paragraph break, trigger cleanup fast
+                state.debounce_duration = Duration::from_millis(DEBOUNCE_NEWLINE_MS);
+            } else if matches!(key_event.code, KeyCode::Char(' ')) {
                 let (row, col) = state.editor.textarea.cursor();
                 let is_sentence_end = if let Some(line) = state.editor.textarea.lines().get(row) {
                     let chars: Vec<char> = line.chars().collect();
