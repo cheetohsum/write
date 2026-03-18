@@ -204,26 +204,38 @@ fn render_startup(f: &mut Frame, state: &mut AppState, area: Rect) {
 }
 
 fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
+    // Dark border color for frame edges
+    let edge = Style::default().fg(theme::WALNUT).bg(theme::WALNUT);
+
     let chunks = Layout::vertical([
-        Constraint::Length(1), // top padding
+        Constraint::Length(1), // top dark edge
+        Constraint::Length(1), // title bar padding above
         Constraint::Length(1), // title bar
+        Constraint::Length(1), // title bar padding below / editor gap
         Constraint::Min(1),   // editor
+        Constraint::Length(1), // info bar padding above
         Constraint::Length(1), // info bar
         Constraint::Length(1), // command bar
+        Constraint::Length(1), // bottom dark edge
     ])
     .split(area);
 
-    // --- Top padding (parchment) ---
-    f.render_widget(Block::default().style(theme::base()), chunks[0]);
+    // --- Dark top edge ---
+    f.render_widget(Block::default().style(edge), chunks[0]);
+    // --- Dark bottom edge ---
+    f.render_widget(Block::default().style(edge), chunks[8]);
+
+    // --- Padding rows (parchment) ---
+    f.render_widget(Block::default().style(theme::status_bar()), chunks[1]);
+    f.render_widget(Block::default().style(theme::base()), chunks[3]);
+    f.render_widget(Block::default().style(theme::base()), chunks[5]);
 
     // --- Centered title bar with icon ---
     let breadcrumb = state.breadcrumb();
     let title_line = Line::from(vec![
         Span::styled(
             "✧ ",
-            Style::default()
-                .fg(theme::GOLD)
-                .bg(theme::UMBER),
+            Style::default().fg(theme::GOLD).bg(theme::UMBER),
         ),
         Span::styled(
             "write",
@@ -232,11 +244,11 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
                 .bg(theme::UMBER)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" │ ", Style::default().fg(theme::CLAY).bg(theme::UMBER)),
+        Span::styled("  │  ", Style::default().fg(theme::CLAY).bg(theme::UMBER)),
         Span::styled(&breadcrumb, theme::title_bar()),
         if state.editor.modified {
             Span::styled(
-                " ●",
+                "  ●",
                 Style::default()
                     .fg(theme::MAROON)
                     .bg(theme::UMBER)
@@ -250,34 +262,33 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
         Paragraph::new(title_line)
             .style(theme::title_bar())
             .alignment(Alignment::Center),
-        chunks[1],
+        chunks[2],
     );
 
-    // --- Editor with borders and padding ---
+    // --- Editor with dark side borders and padding ---
     let editor_outer = Layout::horizontal([
-        Constraint::Length(1), // left border
+        Constraint::Length(1), // left dark edge
         Constraint::Length(4), // left padding
         Constraint::Min(1),   // editor
         Constraint::Length(4), // right padding
-        Constraint::Length(1), // right border
+        Constraint::Length(1), // right dark edge
     ])
-    .split(chunks[2]);
+    .split(chunks[4]);
 
     // Store editor area for mouse click mapping
     state.editor_area = editor_outer[2];
 
-    // Left border
+    // Dark side edges
     for y in editor_outer[0].top()..editor_outer[0].bottom() {
         let cell = &mut f.buffer_mut()[(editor_outer[0].left(), y)];
-        cell.set_char('│');
-        cell.set_fg(theme::SANDSTONE);
+        cell.set_char('▏');
+        cell.set_fg(theme::WALNUT);
         cell.set_bg(theme::PARCHMENT);
     }
-    // Right border
     for y in editor_outer[4].top()..editor_outer[4].bottom() {
         let cell = &mut f.buffer_mut()[(editor_outer[4].left(), y)];
-        cell.set_char('│');
-        cell.set_fg(theme::SANDSTONE);
+        cell.set_char('▕');
+        cell.set_fg(theme::WALNUT);
         cell.set_bg(theme::PARCHMENT);
     }
 
@@ -674,40 +685,42 @@ fn apply_crt_effect(buf: &mut Buffer, area: Rect) {
     if area.width == 0 || area.height == 0 {
         return;
     }
-    let cx = area.width as f64 / 2.0;
-    let cy = area.height as f64 / 2.0;
+    let w = area.width as f64;
+    let h = area.height as f64;
+    let cx = w / 2.0;
+    let cy = h / 2.0;
     let max_dist = (cx * cx + cy * cy).sqrt();
 
     for y in area.top()..area.bottom() {
         let row_idx = y - area.top();
+        let y_norm = (y - area.top()) as f64 / h;
 
         for x in area.left()..area.right() {
-            let x_ratio = (x - area.left()) as f64 / area.width as f64;
+            let x_norm = (x - area.left()) as f64 / w;
 
-            // Scan lines: dim every other row
-            let scanline = if row_idx % 2 == 1 { 0.93 } else { 1.0 };
+            // Scan lines: dim every other row, stronger at edges
+            let edge_boost = 1.0 + (y_norm - 0.5).abs() * 0.08;
+            let scanline = if row_idx % 2 == 1 {
+                0.92 / edge_boost
+            } else {
+                1.0
+            };
 
-            // Vignette: gentle darkening at edges
+            // Vignette: darkening toward edges and corners
             let dx = (x - area.left()) as f64 - cx;
             let dy = (y - area.top()) as f64 - cy;
             let dist = (dx * dx + dy * dy).sqrt() / max_dist;
-            let vignette = 1.0 - (dist * dist * 0.25);
+            let vignette = 1.0 - (dist * dist * 0.35);
 
-            // Chromatic aberration: slight red shift left, blue shift right
-            let r_shift: f64 = if x_ratio < 0.12 {
-                1.06
-            } else if x_ratio > 0.88 {
-                0.96
-            } else {
-                1.0
-            };
-            let b_shift: f64 = if x_ratio > 0.88 {
-                1.06
-            } else if x_ratio < 0.12 {
-                0.96
-            } else {
-                1.0
-            };
+            // Chromatic aberration: smooth gradient across full width
+            // Red channel shifts right (stronger on left), blue shifts left (stronger on right)
+            // Center of screen = no shift, edges = max shift
+            let x_off = x_norm - 0.5; // -0.5 to +0.5
+            let aberration = x_off * x_off * 4.0; // 0 at center, 1 at edges
+            // Left side: boost red, reduce blue. Right side: boost blue, reduce red.
+            let r_shift = 1.0 + x_off * 0.14; // left=0.93, center=1.0, right=1.07
+            let g_shift = 1.0 - aberration * 0.03; // slight green reduction at edges
+            let b_shift = 1.0 - x_off * 0.14; // left=1.07, center=1.0, right=0.93
 
             let factor = scanline * vignette;
 
@@ -716,19 +729,19 @@ fn apply_crt_effect(buf: &mut Buffer, area: Rect) {
             // Foreground
             if let Color::Rgb(r, g, b) = cell.fg {
                 cell.set_fg(Color::Rgb(
-                    ((r as f64) * factor * r_shift).min(255.0).max(0.0) as u8,
-                    ((g as f64) * factor).min(255.0).max(0.0) as u8,
-                    ((b as f64) * factor * b_shift).min(255.0).max(0.0) as u8,
+                    ((r as f64) * factor * r_shift).clamp(0.0, 255.0) as u8,
+                    ((g as f64) * factor * g_shift).clamp(0.0, 255.0) as u8,
+                    ((b as f64) * factor * b_shift).clamp(0.0, 255.0) as u8,
                 ));
             }
 
-            // Background (subtler)
+            // Background
             if let Color::Rgb(r, g, b) = cell.bg {
-                let bg_v = 1.0 - (dist * dist * 0.12);
+                let bg_v = 1.0 - (dist * dist * 0.18);
                 cell.set_bg(Color::Rgb(
-                    ((r as f64) * bg_v * r_shift).min(255.0).max(0.0) as u8,
-                    ((g as f64) * bg_v).min(255.0).max(0.0) as u8,
-                    ((b as f64) * bg_v * b_shift).min(255.0).max(0.0) as u8,
+                    ((r as f64) * bg_v * r_shift).clamp(0.0, 255.0) as u8,
+                    ((g as f64) * bg_v * g_shift).clamp(0.0, 255.0) as u8,
+                    ((b as f64) * bg_v * b_shift).clamp(0.0, 255.0) as u8,
                 ));
             }
         }

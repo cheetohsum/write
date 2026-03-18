@@ -154,7 +154,7 @@ impl<'a> AppState<'a> {
 
     pub fn breadcrumb(&self) -> String {
         if self.page_stack.is_empty() {
-            format!("{}.md", self.doc_title)
+            self.doc_title.clone()
         } else {
             let mut parts: Vec<String> = self
                 .page_stack
@@ -162,10 +162,7 @@ impl<'a> AppState<'a> {
                 .map(|e| e.display_name.clone())
                 .collect();
             parts.push(self.current_page_name.clone());
-            if let Some(first) = parts.first_mut() {
-                *first = format!("{}.md", first);
-            }
-            parts.join(" > ")
+            parts.join(" › ")
         }
     }
 
