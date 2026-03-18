@@ -124,7 +124,10 @@ fn render_startup(f: &mut Frame, state: &mut AppState, area: Rect) {
     );
 
     f.render_widget(
-        Paragraph::new(Span::styled("  Output Directory", theme::label())),
+        Paragraph::new(Line::from(vec![
+            Span::styled("  Location", theme::label()),
+            Span::styled("  click to browse", theme::hint()),
+        ])),
         form_chunks[7],
     );
 

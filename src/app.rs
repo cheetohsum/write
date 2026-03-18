@@ -401,12 +401,27 @@ pub async fn run(
                             && mouse.row < dr.bottom()
                         {
                             state.startup_field = 0;
-                            // Open folder picker
-                            if let Some(path) = crate::config::pick_folder() {
-                                state.dir_input.select_all();
-                                state.dir_input.cut();
-                                state.dir_input.insert_str(&path);
-                                state.output_dir = path;
+                            // Open file/folder picker
+                            if let Some(result) = crate::config::pick_file_or_folder() {
+                                match result {
+                                    crate::config::PickResult::Directory(dir) => {
+                                        state.dir_input.select_all();
+                                        state.dir_input.cut();
+                                        state.dir_input.insert_str(&dir);
+                                        state.output_dir = dir;
+                                    }
+                                    crate::config::PickResult::File { dir, title } => {
+                                        state.dir_input.select_all();
+                                        state.dir_input.cut();
+                                        state.dir_input.insert_str(&dir);
+                                        state.output_dir = dir;
+                                        state.title_input.select_all();
+                                        state.title_input.cut();
+                                        state.title_input.insert_str(&title);
+                                        // Auto-focus the title field so user can edit
+                                        state.startup_field = 1;
+                                    }
+                                }
                             }
                         } else if tr.width > 0
                             && mouse.column >= tr.left()

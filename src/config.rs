@@ -196,36 +196,96 @@ pub fn load_preferred_provider() -> Option<u8> {
     }
 }
 
+/// Result from the file/folder picker.
+pub enum PickResult {
+    /// User chose a directory
+    Directory(String),
+    /// User chose a file — (directory, title without extension)
+    File { dir: String, title: String },
+}
+
+/// Open a native dialog that lets the user choose a directory OR a .md/.txt file.
+/// If they pick a file, returns the parent directory and the filename (sans extension).
 #[cfg(target_os = "windows")]
-pub fn pick_folder() -> Option<String> {
+pub fn pick_file_or_folder() -> Option<PickResult> {
     use std::os::windows::process::CommandExt;
-    // Use Shell.Application COM object — reliable native dialog that works
-    // regardless of console/window state (unlike WinForms FolderBrowserDialog)
+    // OpenFileDialog with filter for .md/.txt, or a "Folders" pseudo-option.
+    // We use a file dialog since it lets users pick files AND navigate to folders.
+    // The user can also type a folder path directly.
+    let script = r#"
+Add-Type -AssemblyName System.Windows.Forms
+$d = New-Object System.Windows.Forms.OpenFileDialog
+$d.Title = 'Choose a document or folder'
+$d.Filter = 'Documents (*.md;*.txt)|*.md;*.txt|All files (*.*)|*.*'
+$d.CheckFileExists = $false
+$d.FileName = 'Select Folder'
+$o = New-Object System.Windows.Forms.Form
+$o.TopMost = $true
+if ($d.ShowDialog($o) -eq 'OK') {
+    $d.FileName
+}
+$o.Dispose()
+"#;
     let output = std::process::Command::new("powershell")
-        .args([
-            "-NoProfile", "-Command",
-            "$f = (New-Object -ComObject Shell.Application).BrowseForFolder(0, 'Choose output directory', 0x50, 0); if($f){$f.Self.Path}",
-        ])
-        .creation_flags(0x08000000) // CREATE_NO_WINDOW — hide powershell console
+        .args(["-NoProfile", "-Command", script])
+        .creation_flags(0x08000000)
         .output()
         .ok()?;
     let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if path.is_empty() { None } else { Some(path) }
+    if path.is_empty() {
+        return None;
+    }
+    parse_pick_result(&path)
 }
 
 #[cfg(target_os = "macos")]
-pub fn pick_folder() -> Option<String> {
+pub fn pick_file_or_folder() -> Option<PickResult> {
+    // macOS: use osascript to choose a file (with type filter) or folder
     let output = std::process::Command::new("osascript")
-        .args(["-e", "POSIX path of (choose folder)"])
+        .args([
+            "-e",
+            "POSIX path of (choose file of type {\"md\", \"txt\", \"public.folder\"} with prompt \"Choose a document or folder\")",
+        ])
         .output()
         .ok()?;
     let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if path.is_empty() { None } else { Some(path) }
+    if path.is_empty() {
+        return None;
+    }
+    parse_pick_result(&path)
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-pub fn pick_folder() -> Option<String> {
+pub fn pick_file_or_folder() -> Option<PickResult> {
     None
+}
+
+fn parse_pick_result(path: &str) -> Option<PickResult> {
+    let p = std::path::Path::new(path);
+
+    // If it's an existing file with .md or .txt extension
+    if p.is_file() {
+        let dir = p.parent()?.to_string_lossy().to_string();
+        let title = p.file_stem()?.to_string_lossy().to_string();
+        return Some(PickResult::File { dir, title });
+    }
+
+    // If it's a directory
+    if p.is_dir() {
+        return Some(PickResult::Directory(p.to_string_lossy().to_string()));
+    }
+
+    // The path might be a new filename the user typed (doesn't exist yet)
+    if let Some(ext) = p.extension() {
+        if ext == "md" || ext == "txt" {
+            let dir = p.parent()?.to_string_lossy().to_string();
+            let title = p.file_stem()?.to_string_lossy().to_string();
+            return Some(PickResult::File { dir, title });
+        }
+    }
+
+    // Treat as directory path
+    Some(PickResult::Directory(path.to_string()))
 }
 
 pub fn open_provider_url(index: usize) {
