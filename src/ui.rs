@@ -65,29 +65,44 @@ fn render_startup(f: &mut Frame, state: &mut AppState, area: Rect) {
     let form_area = centered_rect(55, chunks[1]);
 
     let form_chunks = Layout::vertical([
-        Constraint::Length(1), // decorative top line
-        Constraint::Length(1), // blank
-        Constraint::Length(1), // title "write"
-        Constraint::Length(1), // subtitle
-        Constraint::Length(1), // blank
-        Constraint::Length(1), // decorative mid line
-        Constraint::Length(1), // blank
-        Constraint::Length(1), // dir label
-        Constraint::Length(3), // dir input
-        Constraint::Length(1), // title label
-        Constraint::Length(3), // title input
-        Constraint::Length(1), // blank
-        Constraint::Length(1), // decorative bottom line
-        Constraint::Length(1), // blank
-        Constraint::Length(1), // provider + keybindings
+        Constraint::Length(1), // [0] ✧ icon
+        Constraint::Length(1), // [1] decorative top line
+        Constraint::Length(1), // [2] title "write"
+        Constraint::Length(1), // [3] subtitle
+        Constraint::Length(1), // [4] blank
+        Constraint::Length(1), // [5] decorative mid line
+        Constraint::Length(1), // [6] blank
+        Constraint::Length(1), // [7] dir label
+        Constraint::Length(3), // [8] dir input
+        Constraint::Length(1), // [9] title label
+        Constraint::Length(3), // [10] title input
+        Constraint::Length(1), // [11] blank
+        Constraint::Length(1), // [12] decorative bottom line
+        Constraint::Length(1), // [13] blank
+        Constraint::Length(1), // [14] provider + keybindings
     ])
     .split(form_area);
 
     let deco_width = form_area.width as usize;
+
+    // ✧ icon above gold bar
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            "✧",
+            Style::default()
+                .fg(theme::GOLD)
+                .bg(theme::PARCHMENT)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .alignment(Alignment::Center),
+        form_chunks[0],
+    );
+
+    // Gold decorative line
     let top_line = "━".repeat(deco_width);
     f.render_widget(
         Paragraph::new(Span::styled(&top_line, theme::decorative_line())),
-        form_chunks[0],
+        form_chunks[1],
     );
 
     f.render_widget(
@@ -217,7 +232,7 @@ fn render_startup(f: &mut Frame, state: &mut AppState, area: Rect) {
 fn render_settings(f: &mut Frame, state: &mut AppState, area: Rect) {
     let chunks = Layout::vertical([
         Constraint::Min(1),
-        Constraint::Length(22),
+        Constraint::Length(26),
         Constraint::Min(1),
     ])
     .split(area);
@@ -238,10 +253,11 @@ fn render_settings(f: &mut Frame, state: &mut AppState, area: Rect) {
         Constraint::Length(3), // [9] OpenAI input
         Constraint::Length(1), // [10] OpenRouter label + link
         Constraint::Length(3), // [11] OpenRouter input
-        Constraint::Length(1), // [12] blank
-        Constraint::Length(1), // [13] bottom decorative line
-        Constraint::Length(1), // [14] blank
-        Constraint::Length(1), // [15] hints bar
+        Constraint::Length(1), // [12] Model label
+        Constraint::Length(3), // [13] Model input
+        Constraint::Length(1), // [14] bottom decorative line
+        Constraint::Length(1), // [15] blank
+        Constraint::Length(1), // [16] hints bar
     ])
     .split(form_area);
 
@@ -354,13 +370,48 @@ fn render_settings(f: &mut Frame, state: &mut AppState, area: Rect) {
                 .set_cursor_style(ratatui::style::Style::default());
             state.settings_inputs[i].set_style(theme::input_inactive());
         }
+        // Store input rect for mouse click handling
+        state.settings_input_rects[i] = input_chunk;
         f.render_widget(&state.settings_inputs[i], input_chunk);
+    }
+
+    // Model field
+    f.render_widget(
+        Paragraph::new(Span::styled("  Model (optional)", theme::label())),
+        form_chunks[12],
+    );
+
+    {
+        let is_active = state.settings_field == 3;
+        let border_style = if is_active {
+            theme::border_active()
+        } else {
+            theme::border()
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(border_style)
+            .style(theme::base());
+
+        if is_active {
+            state.model_input.set_block(block);
+            state.model_input.set_cursor_style(theme::cursor());
+            state.model_input.set_style(theme::input_active());
+        } else {
+            state.model_input.set_block(block);
+            state.model_input
+                .set_cursor_style(ratatui::style::Style::default());
+            state.model_input.set_style(theme::input_inactive());
+        }
+        state.settings_input_rects[3] = form_chunks[13];
+        f.render_widget(&state.model_input, form_chunks[13]);
     }
 
     // Bottom decorative line
     f.render_widget(
         Paragraph::new(Span::styled(&mid_line, theme::decorative_line_subtle())),
-        form_chunks[13],
+        form_chunks[14],
     );
 
     // Hints bar
@@ -375,7 +426,7 @@ fn render_settings(f: &mut Frame, state: &mut AppState, area: Rect) {
             Span::styled("esc", key_style),
             Span::styled(" back", theme::hint()),
         ])),
-        form_chunks[15],
+        form_chunks[16],
     );
 }
 

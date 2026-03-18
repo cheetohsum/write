@@ -13,6 +13,7 @@ mod windows_setup {
     use std::ptr;
 
     use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute;
     use windows_sys::Win32::System::Console::{
         AllocConsole, GetConsoleWindow, SetConsoleTitleW,
         SetConsoleScreenBufferSize, SetConsoleWindowInfo,
@@ -41,8 +42,6 @@ mod windows_setup {
         if existing.is_null() {
             // No console — release mode with windows_subsystem = "windows".
             // Relaunch through conhost.exe for a standalone window with our icon.
-            // Without this, Win11 routes AllocConsole through Windows Terminal,
-            // which ignores our WM_SETICON calls.
             if std::env::var("_WRITE_CONHOST").is_err() {
                 if relaunch_via_conhost() {
                     std::process::exit(0);
@@ -58,11 +57,11 @@ mod windows_setup {
 
         set_title();
         set_icon();
+        theme_title_bar();
         configure_console_font();
         set_window_size(120, 35);
         center_window();
 
-        // Ensure window is brought to front
         let hwnd = unsafe { GetConsoleWindow() };
         if !hwnd.is_null() {
             unsafe {
@@ -71,8 +70,6 @@ mod windows_setup {
         }
     }
 
-    /// Relaunch through conhost.exe to bypass Windows Terminal and get
-    /// a dedicated console window where we can set our own icon.
     fn relaunch_via_conhost() -> bool {
         let exe = match std::env::current_exe() {
             Ok(p) => p,
@@ -108,12 +105,9 @@ mod windows_setup {
             return;
         }
 
-        // MAKEINTRESOURCE(1) — icon resource ID set by winresource in build.rs
         let res_id = 1usize as *const u16;
 
-        // Load big icon (for title bar and alt-tab)
         let hicon_big = unsafe { LoadImageW(hmodule, res_id, IMAGE_ICON, 32, 32, 0) };
-        // Load small icon (for window corner and taskbar)
         let hicon_small = unsafe { LoadImageW(hmodule, res_id, IMAGE_ICON, 16, 16, 0) };
 
         if !hicon_big.is_null() {
@@ -125,6 +119,47 @@ mod windows_setup {
             unsafe {
                 SendMessageW(hwnd, WM_SETICON, ICON_SMALL as usize, hicon_small as isize);
             }
+        }
+    }
+
+    /// Theme the Windows title bar chrome to match the app's umber/cream palette.
+    fn theme_title_bar() {
+        let hwnd = unsafe { GetConsoleWindow() };
+        if hwnd.is_null() {
+            return;
+        }
+
+        // DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+        let dark_mode: i32 = 1;
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                20,
+                &dark_mode as *const i32 as *const _,
+                std::mem::size_of::<i32>() as u32,
+            );
+        }
+
+        // DWMWA_CAPTION_COLOR = 35 — set to umber RGB(92, 74, 60) as COLORREF 0x00BBGGRR
+        let caption_color: u32 = 0x003C4A5C;
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                35,
+                &caption_color as *const u32 as *const _,
+                std::mem::size_of::<u32>() as u32,
+            );
+        }
+
+        // DWMWA_TEXT_COLOR = 36 — set to cream RGB(250, 245, 235)
+        let text_color: u32 = 0x00EBF5FA;
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                36,
+                &text_color as *const u32 as *const _,
+                std::mem::size_of::<u32>() as u32,
+            );
         }
     }
 
@@ -147,7 +182,7 @@ mod windows_setup {
             cbSize: std::mem::size_of::<CONSOLE_FONT_INFOEX>() as u32,
             nFont: 0,
             dwFontSize: COORD { X: 0, Y: 20 },
-            FontFamily: 54, // TrueType + fixed pitch
+            FontFamily: 54,
             FontWeight: 400,
             FaceName: face_name,
         };
@@ -174,13 +209,12 @@ mod windows_setup {
             SetConsoleWindowInfo(handle, 1, &small_rect);
         }
 
-        // Set buffer size
-        let buffer_size = COORD { X: cols, Y: 9999 };
+        // Buffer matches window size exactly — no scrollback means no scrollbar
+        let buffer_size = COORD { X: cols, Y: rows };
         unsafe {
             SetConsoleScreenBufferSize(handle, buffer_size);
         }
 
-        // Set window size (right/bottom are inclusive)
         let window_rect = SMALL_RECT {
             Left: 0,
             Top: 0,

@@ -114,7 +114,9 @@ pub struct AppState<'a> {
     pub settings_field: u8,
     pub settings_inputs: [TextArea<'a>; 3],
     pub settings_link_rects: [Rect; 3],
+    pub settings_input_rects: [Rect; 4],
     pub preferred_provider: Option<u8>,
+    pub model_input: TextArea<'a>,
     // Startup screen click areas
     pub dir_input_rect: Rect,
 }
@@ -177,7 +179,9 @@ impl<'a> AppState<'a> {
                 TextArea::default(),
             ],
             settings_link_rects: [Rect::default(); 3],
+            settings_input_rects: [Rect::default(); 4],
             preferred_provider: crate::config::load_preferred_provider(),
+            model_input: TextArea::default(),
             dir_input_rect: Rect::default(),
         }
     }
@@ -372,7 +376,7 @@ pub async fn run(
                             }
                         }
                     }
-                    // Settings screen: click links to open provider URLs
+                    // Settings screen: click links or input fields
                     if state.screen == Screen::Settings
                         && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
                     {
@@ -384,6 +388,17 @@ pub async fn run(
                                 && mouse.row < rect.bottom()
                             {
                                 crate::config::open_provider_url(i);
+                            }
+                        }
+                        // Click on input fields to focus them
+                        for (i, rect) in state.settings_input_rects.iter().enumerate() {
+                            if rect.width > 0
+                                && mouse.column >= rect.left()
+                                && mouse.column < rect.right()
+                                && mouse.row >= rect.top()
+                                && mouse.row < rect.bottom()
+                            {
+                                state.settings_field = i as u8;
                             }
                         }
                     }
@@ -637,7 +652,7 @@ fn handle_settings_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
             }
         }
         Action::Tab => {
-            state.settings_field = (state.settings_field + 1) % 3;
+            state.settings_field = (state.settings_field + 1) % 4;
         }
         Action::Back => {
             save_settings(state);
@@ -656,7 +671,11 @@ fn handle_settings_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
         }
         Action::ForwardToEditor(key_event) => {
             let idx = state.settings_field as usize;
-            state.settings_inputs[idx].input(key_event);
+            if idx < 3 {
+                state.settings_inputs[idx].input(key_event);
+            } else {
+                state.model_input.input(key_event);
+            }
         }
         _ => {}
     }
@@ -672,6 +691,12 @@ fn init_settings_inputs(state: &mut AppState) {
             state.settings_inputs[i].insert_str(key);
         }
     }
+    // Load model override
+    state.model_input.select_all();
+    state.model_input.cut();
+    if let Ok(model) = std::env::var("LLM_MODEL") {
+        state.model_input.insert_str(&model);
+    }
     state.settings_field = 0;
     state.preferred_provider = crate::config::load_preferred_provider();
 }
@@ -682,7 +707,8 @@ fn save_settings(state: &mut AppState) {
         state.settings_inputs[1].lines().join(""),
         state.settings_inputs[2].lines().join(""),
     ];
-    crate::config::save_api_keys(&keys, state.preferred_provider);
+    let model = state.model_input.lines().join("");
+    crate::config::save_api_keys(&keys, state.preferred_provider, &model);
     state.llm_config = crate::config::load_config();
     state.llm_enabled = state.llm_config.is_some();
     state.llm_status = if state.llm_config.is_some() {

@@ -137,7 +137,7 @@ pub fn load_saved_keys() -> [String; 3] {
     keys
 }
 
-pub fn save_api_keys(keys: &[String; 3], preferred: Option<u8>) {
+pub fn save_api_keys(keys: &[String; 3], preferred: Option<u8>, model: &str) {
     let dir = config_dir();
     let _ = fs::create_dir_all(&dir);
 
@@ -159,6 +159,11 @@ pub fn save_api_keys(keys: &[String; 3], preferred: Option<u8>) {
             content.push_str(&format!("LLM_PROVIDER={}\n", provider_name));
             env::set_var("LLM_PROVIDER", provider_name);
         }
+    }
+
+    if !model.is_empty() {
+        content.push_str(&format!("LLM_MODEL={}\n", model));
+        env::set_var("LLM_MODEL", model);
     }
 
     let _ = fs::write(env_file_path(), content);
@@ -183,15 +188,11 @@ pub fn load_preferred_provider() -> Option<u8> {
 
 #[cfg(target_os = "windows")]
 pub fn pick_folder() -> Option<String> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
     let output = std::process::Command::new("powershell")
         .args([
-            "-NoProfile",
-            "-Command",
-            "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'Choose output directory'; if($d.ShowDialog() -eq 'OK'){Write-Output $d.SelectedPath}",
+            "-NoProfile", "-WindowStyle", "Hidden", "-Command",
+            "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'Choose output directory'; $o = New-Object System.Windows.Forms.Form; $o.TopMost = $true; if($d.ShowDialog($o) -eq 'OK'){$d.SelectedPath}; $o.Dispose()",
         ])
-        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .ok()?;
     let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
