@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
@@ -22,6 +22,8 @@ const DEBOUNCE_WORD_MS: u64 = 800;
 const DEBOUNCE_SENTENCE_MS: u64 = 300;
 const DEBOUNCE_RATE_LIMITED_MS: u64 = 8000;
 const ANIMATION_DURATION_MS: u64 = 200;
+const STARTUP_ANIM_MS: u64 = 900;
+const TRANSITION_MS: u64 = 350;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Screen {
@@ -49,6 +51,14 @@ pub struct AnimationState {
     pub start: Instant,
 }
 
+pub struct StartupAnim {
+    pub start: Instant,
+}
+
+pub struct TransitionAnim {
+    pub start: Instant,
+}
+
 pub struct AppState<'a> {
     pub screen: Screen,
     pub llm_config: Option<LlmConfig>,
@@ -67,6 +77,8 @@ pub struct AppState<'a> {
     pub in_flight: bool,
     pub should_quit: bool,
     pub animation: Option<AnimationState>,
+    pub startup_anim: Option<StartupAnim>,
+    pub transition: Option<TransitionAnim>,
 }
 
 impl<'a> AppState<'a> {
@@ -109,6 +121,10 @@ impl<'a> AppState<'a> {
             in_flight: false,
             should_quit: false,
             animation: None,
+            startup_anim: Some(StartupAnim {
+                start: Instant::now(),
+            }),
+            transition: None,
         }
     }
 }
@@ -130,11 +146,25 @@ pub async fn run(
     };
 
     loop {
-        // Update wrap width from terminal size (minus padding)
+        // Update wrap width
         let term_width = terminal.size()?.width;
         state.editor.wrap_width = term_width.saturating_sub(10);
 
-        // Drive animation
+        // Clear startup animation when done
+        if let Some(ref anim) = state.startup_anim {
+            if anim.start.elapsed().as_millis() as u64 >= STARTUP_ANIM_MS {
+                state.startup_anim = None;
+            }
+        }
+
+        // Complete transition when done
+        if let Some(ref trans) = state.transition {
+            if trans.start.elapsed().as_millis() as u64 >= TRANSITION_MS {
+                state.transition = None;
+            }
+        }
+
+        // Drive LLM cleanup animation
         let anim_action = if let Some(ref anim) = state.animation {
             let elapsed = anim.start.elapsed().as_millis() as u64;
             if elapsed >= ANIMATION_DURATION_MS {
@@ -176,7 +206,7 @@ pub async fn run(
             }
         }
 
-        // Check for LLM responses (non-blocking)
+        // Check for LLM responses
         if let Some(ref mut rx) = llm_rx {
             if let Ok(response) = rx.try_recv() {
                 state.in_flight = false;
@@ -190,6 +220,7 @@ pub async fn run(
             && !state.in_flight
             && state.editor.modified
             && state.animation.is_none()
+            && state.transition.is_none()
         {
             let elapsed = state.last_keypress.elapsed();
             if elapsed >= state.debounce_duration {
@@ -211,18 +242,42 @@ pub async fn run(
             }
         }
 
-        // Faster poll during animation for smooth scramble effect
-        let poll_duration = if state.animation.is_some() {
-            Duration::from_millis(35)
+        // Poll rate: fast during any animation
+        let animating = state.animation.is_some()
+            || state.startup_anim.is_some()
+            || state.transition.is_some();
+        let poll_duration = if animating {
+            Duration::from_millis(30)
         } else {
             Duration::from_millis(100)
         };
 
         if event::poll(poll_duration)? {
             if let Event::Key(key) = event::read()? {
+                // During startup animation, only allow quit
+                if state.startup_anim.is_some() {
+                    if matches!(key.code, KeyCode::Esc)
+                        || matches!(
+                            (key.code, key.modifiers),
+                            (KeyCode::Char('q'), KeyModifiers::CONTROL)
+                        )
+                    {
+                        state.should_quit = true;
+                    }
+                    if state.should_quit {
+                        break;
+                    }
+                    continue;
+                }
+
+                // During transition, swallow all input
+                if state.transition.is_some() {
+                    continue;
+                }
+
                 state.last_keypress = Instant::now();
 
-                // Cancel animation on any keypress — apply final text
+                // Cancel LLM animation on keypress
                 if let Some(anim) = state.animation.take() {
                     state.editor.replace_content(&anim.new_text);
                     state.editor.last_sent_hash = llm::content_hash(&anim.new_text);
@@ -265,7 +320,11 @@ fn handle_startup_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
 
             state.output_dir = dir;
             state.doc_title = sanitize_filename(&title);
+            // Switch to editor and start transition animation
             state.screen = Screen::Editor;
+            state.transition = Some(TransitionAnim {
+                start: Instant::now(),
+            });
         }
         Action::Quit => {
             state.should_quit = true;
@@ -362,14 +421,12 @@ fn handle_llm_response(state: &mut AppState, response: LlmResponse) {
         return;
     }
 
-    // Check staleness
     let current_hash = state.editor.content_hash();
     if response.original_hash != current_hash {
         state.llm_status = LlmStatus::Idle;
         return;
     }
 
-    // Sanity check: response shouldn't be wildly different in length
     let original_len = state.editor.content().len();
     let cleaned_len = response.cleaned_text.len();
     if cleaned_len > original_len * 2 || (original_len > 10 && cleaned_len < original_len / 3) {
@@ -380,17 +437,14 @@ fn handle_llm_response(state: &mut AppState, response: LlmResponse) {
     let old_text = state.editor.content();
     let new_text = &response.cleaned_text;
 
-    // Compute diff
     let changed = diff_positions(&old_text, new_text);
     if changed.is_empty() {
-        // No changes — just update hash and status
         state.editor.last_sent_hash = llm::content_hash(new_text);
         state.llm_status = LlmStatus::Applied;
         state.debounce_duration = Duration::from_millis(DEBOUNCE_IDLE_MS);
         return;
     }
 
-    // Generate resolve times: each position settles at a random time between 30-190ms
     let start_nanos = Instant::now().elapsed().as_nanos() as u64;
     let resolve_times: Vec<u64> = changed
         .iter()
@@ -404,7 +458,6 @@ fn handle_llm_response(state: &mut AppState, response: LlmResponse) {
         })
         .collect();
 
-    // Start animation
     state.animation = Some(AnimationState {
         new_text: new_text.clone(),
         changed_positions: changed,
@@ -412,8 +465,6 @@ fn handle_llm_response(state: &mut AppState, response: LlmResponse) {
         start: Instant::now(),
     });
     state.llm_status = LlmStatus::Cleaning;
-
-    // Reset debounce
     state.debounce_duration = Duration::from_millis(DEBOUNCE_IDLE_MS);
 }
 

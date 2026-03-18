@@ -12,6 +12,7 @@ pub const GOLD: Color = Color::Rgb(196, 166, 97);
 pub const UMBER: Color = Color::Rgb(92, 74, 60);
 pub const CREAM: Color = Color::Rgb(250, 245, 235);
 pub const WHEAT: Color = Color::Rgb(235, 222, 200);
+pub const MAROON: Color = Color::Rgb(120, 38, 38);
 
 pub fn base() -> Style {
     Style::default().fg(WALNUT).bg(PARCHMENT)
@@ -29,12 +30,23 @@ pub fn accent() -> Style {
     Style::default().fg(TERRACOTTA).bg(PARCHMENT)
 }
 
+pub fn accent_strong() -> Style {
+    Style::default().fg(MAROON).bg(PARCHMENT)
+}
+
 pub fn title_bar() -> Style {
-    Style::default().fg(WALNUT).bg(WHEAT).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(CREAM)
+        .bg(UMBER)
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn border() -> Style {
     Style::default().fg(SANDSTONE).bg(PARCHMENT)
+}
+
+pub fn border_active() -> Style {
+    Style::default().fg(MAROON).bg(PARCHMENT)
 }
 
 pub fn input_active() -> Style {
@@ -46,7 +58,11 @@ pub fn input_inactive() -> Style {
 }
 
 pub fn label() -> Style {
-    Style::default().fg(CLAY).bg(PARCHMENT)
+    Style::default().fg(WALNUT).bg(PARCHMENT)
+}
+
+pub fn hint() -> Style {
+    Style::default().fg(SANDSTONE).bg(PARCHMENT)
 }
 
 pub fn modal_bg() -> Style {
@@ -54,9 +70,20 @@ pub fn modal_bg() -> Style {
 }
 
 pub fn button() -> Style {
-    Style::default().fg(CREAM).bg(TERRACOTTA).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(CREAM)
+        .bg(TERRACOTTA)
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn cursor() -> Style {
     Style::default().fg(PARCHMENT).bg(WALNUT)
+}
+
+pub fn decorative_line() -> Style {
+    Style::default().fg(GOLD).bg(PARCHMENT)
+}
+
+pub fn decorative_line_subtle() -> Style {
+    Style::default().fg(SANDSTONE).bg(PARCHMENT)
 }

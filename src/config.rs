@@ -26,7 +26,13 @@ pub struct LlmConfig {
 
 impl LlmConfig {
     pub fn display(&self) -> String {
-        format!("{} ({})", self.provider.display_name(), self.model)
+        // Show a clean short name
+        let short_model = match self.model.as_str() {
+            "claude-haiku-4-5-20241022" => "haiku",
+            "gpt-4o-mini" => "4o-mini",
+            other => other,
+        };
+        format!("{} · {}", self.provider.display_name(), short_model)
     }
 }
 
