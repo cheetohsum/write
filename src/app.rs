@@ -971,10 +971,14 @@ fn handle_llm_response(state: &mut AppState, response: LlmResponse) {
         return;
     }
 
-    // Apply cleaned text and start visual dissolve on changed positions
+    // Apply cleaned text and start visual dissolve on changed positions.
+    // Do NOT call wrap_all_lines() — it shifts line boundaries and disrupts
+    // the cursor position. The LLM response preserves the user's line breaks,
+    // and any long lines get wrapped naturally when the user types on them.
     state.editor.replace_content(new_text);
-    state.editor.wrap_all_lines();
-    state.editor.last_sent_hash = llm::content_hash(new_text);
+    // Hash the ACTUAL editor content (after replacement), not the LLM response,
+    // to prevent a regeneration loop when content differs due to padding/trailing lines.
+    state.editor.last_sent_hash = state.editor.content_hash();
     state.llm_status = LlmStatus::Applied;
     state.llm_status_flash = Some(Instant::now());
     state.debounce_duration = Duration::from_millis(DEBOUNCE_IDLE_MS);

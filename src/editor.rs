@@ -86,46 +86,42 @@ impl<'a> EditorState<'a> {
         self.textarea.move_cursor(CursorMove::End);
     }
 
-    /// Wrap all lines that exceed wrap_width. Called after LLM replacements.
-    /// Preserves the exact cursor position so the user isn't interrupted.
-    pub fn wrap_all_lines(&mut self) {
-        let max = self.wrap_width as usize;
-        if max == 0 {
-            return;
-        }
-        let content = self.content();
-        let mut wrapped = String::new();
-        for line in content.lines() {
-            let mut remaining = line;
-            while remaining.len() > max {
-                let break_at = match remaining[..max].rfind(' ') {
-                    Some(pos) => pos,
-                    None => break,
-                };
-                wrapped.push_str(&remaining[..break_at]);
-                wrapped.push('\n');
-                remaining = &remaining[break_at + 1..];
-            }
-            wrapped.push_str(remaining);
-            wrapped.push('\n');
-        }
-        if wrapped.ends_with('\n') {
-            wrapped.pop();
-        }
-        if wrapped != content {
-            let (row, col) = self.textarea.cursor();
-            self.set_content_with_cursor(&wrapped, row, col);
-        }
-    }
-
     /// Replace content only if it actually changed.
-    /// Preserves exact cursor position so the user isn't interrupted.
+    /// Tracks cursor as an offset from the END of the document so that
+    /// LLM changes before the cursor don't shift its position.
     pub fn replace_content(&mut self, new_text: &str) {
         if self.content() == new_text {
             return;
         }
+        let old_content = self.content();
         let (row, col) = self.textarea.cursor();
-        self.set_content_with_cursor(new_text, row, col);
+
+        // Compute cursor position as characters from the END of the document.
+        // This is immune to the LLM adding/removing chars before the cursor.
+        let chars_before: usize = old_content
+            .split('\n')
+            .take(row)
+            .map(|l| l.len() + 1)
+            .sum::<usize>()
+            + col;
+        let offset_from_end = old_content.len().saturating_sub(chars_before);
+
+        // Map the end-offset back to (row, col) in the new text
+        let new_cursor_pos = new_text.len().saturating_sub(offset_from_end);
+        let mut new_row = 0;
+        let mut new_col = 0;
+        let mut pos = 0;
+        for (i, line) in new_text.split('\n').enumerate() {
+            if pos + line.len() >= new_cursor_pos {
+                new_row = i;
+                new_col = new_cursor_pos.saturating_sub(pos);
+                break;
+            }
+            pos += line.len() + 1;
+            new_row = i + 1;
+        }
+
+        self.set_content_with_cursor(new_text, new_row, new_col);
     }
 
     pub fn set_content_with_cursor(&mut self, content: &str, row: usize, col: usize) {
