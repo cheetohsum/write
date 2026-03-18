@@ -232,10 +232,11 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // --- Centered title bar with icon ---
     let breadcrumb = state.breadcrumb();
+    let icon_color = if state.llm_enabled { theme::GOLD } else { theme::MAROON };
     let title_line = Line::from(vec![
         Span::styled(
             "✧ ",
-            Style::default().fg(theme::GOLD).bg(theme::UMBER),
+            Style::default().fg(icon_color).bg(theme::UMBER),
         ),
         Span::styled(
             "write",
