@@ -22,7 +22,8 @@ The interface uses a warm **Taliesin** color scheme inspired by Frank Lloyd Wrig
 
 ## Features
 
-- **Context-aware spell correction** — uses surrounding words to pick the right fix (e.g. "Hen I got home" → "When", not "Hen")
+- **Context-aware proofreading** — fixes spelling, grammar, and formatting using surrounding context (e.g. "Hen I got home" → "When", not "Hen")
+- **Screenplay formatting** — detects INT./EXT. headings, character names, dialogue, transitions, and camera directions; formats them automatically
 - **Respects your voice** — won't rewrite prose, change style, or take creative liberty
 - **Standalone window** — opens as its own app with themed title bar and icon (not inside cmd.exe)
 - **Settings screen** — configure API keys, choose preferred provider, browse OpenRouter models
@@ -130,6 +131,35 @@ Linked pages are stored alongside your document:
 
 Compatible with Obsidian, Logseq, and other wiki-link tools.
 
+## Screenplay Support
+
+Write detects when you're writing a screenplay and formats elements automatically:
+
+```markdown
+**FADE IN:**
+
+**EXT. DESERT HIGHWAY - DAY**
+
+A heat shimmer ripples across empty asphalt stretching to the horizon.
+
+**WIDE SHOT**
+
+A single car appears in the distance.
+
+**JACK**
+*(squinting)*
+We should have turned left at Albuquerque.
+
+**MARIA**
+That's what I said three hours ago.
+
+**CUT TO:**
+```
+
+Supported elements: scene headings (INT./EXT.), character names, dialogue, parentheticals, transitions (CUT TO, FADE IN/OUT, SMASH CUT), camera directions (CLOSE UP, WIDE SHOT, PAN, TRACKING SHOT, POV, OVER THE SHOULDER), shot descriptions (ANGLE ON, INSERT, MONTAGE), and continuation markers.
+
+Regular prose dialogue stays inline with quotation marks — screenplay formatting only activates when the document contains screenplay structure.
+
 ## Architecture
 
 ```
@@ -147,7 +177,7 @@ src/
     ├── claude.rs    # Anthropic Messages API
     ├── openai.rs    # OpenAI Chat Completions API
     ├── openrouter.rs
-    └── prompt.rs    # Proofreading system prompt
+    └── prompt.rs    # Proofreading + screenplay system prompt
 ```
 
 ## Color Palette
