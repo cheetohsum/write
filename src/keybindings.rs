@@ -4,9 +4,11 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 pub enum Action {
     Save,
     Quit,
+    Back,
     ToggleLlm,
     CreateLink,
     OpenLink,
+    OpenUrl,
     Confirm,
     Cancel,
     Tab,
@@ -27,7 +29,7 @@ pub fn map_editor_key(key: KeyEvent) -> Action {
         } => Action::Quit,
         KeyEvent {
             code: KeyCode::Esc, ..
-        } => Action::Quit,
+        } => Action::Back,
         KeyEvent {
             code: KeyCode::Char('l'),
             modifiers: KeyModifiers::CONTROL,
@@ -64,6 +66,28 @@ pub fn map_startup_key(key: KeyEvent) -> Action {
             modifiers: KeyModifiers::CONTROL,
             ..
         } => Action::Quit,
+        _ => Action::ForwardToEditor(key),
+    }
+}
+
+pub fn map_settings_key(key: KeyEvent) -> Action {
+    match key {
+        KeyEvent {
+            code: KeyCode::Tab, ..
+        } => Action::Tab,
+        KeyEvent {
+            code: KeyCode::Esc, ..
+        } => Action::Back,
+        KeyEvent {
+            code: KeyCode::Char('q'),
+            modifiers: KeyModifiers::CONTROL,
+            ..
+        } => Action::Quit,
+        KeyEvent {
+            code: KeyCode::Char('o'),
+            modifiers: KeyModifiers::CONTROL,
+            ..
+        } => Action::OpenUrl,
         _ => Action::ForwardToEditor(key),
     }
 }

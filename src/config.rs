@@ -1,4 +1,6 @@
 use std::env;
+use std::fs;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Provider {
@@ -37,6 +39,12 @@ impl LlmConfig {
 }
 
 pub fn load_config() -> Option<LlmConfig> {
+    // Load from app config dir first (user settings take priority)
+    let config_env = env_file_path();
+    if config_env.exists() {
+        let _ = dotenvy::from_path(&config_env);
+    }
+
     let _ = dotenvy::dotenv();
 
     // Check explicit provider override
@@ -84,4 +92,98 @@ fn try_openrouter(model: Option<String>) -> Option<LlmConfig> {
         api_key: key,
         model: model.unwrap_or_else(|| "anthropic/claude-haiku".to_string()),
     })
+}
+
+// --- Settings persistence ---
+
+pub fn config_dir() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("write")
+}
+
+fn env_file_path() -> PathBuf {
+    config_dir().join(".env")
+}
+
+pub const PROVIDER_NAMES: [&str; 3] = ["Anthropic", "OpenAI", "OpenRouter"];
+pub const PROVIDER_URLS: [&str; 3] = [
+    "console.anthropic.com/settings/keys",
+    "platform.openai.com/api-keys",
+    "openrouter.ai/keys",
+];
+const PROVIDER_FULL_URLS: [&str; 3] = [
+    "https://console.anthropic.com/settings/keys",
+    "https://platform.openai.com/api-keys",
+    "https://openrouter.ai/keys",
+];
+const ENV_VAR_NAMES: [&str; 3] = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"];
+
+pub fn load_saved_keys() -> [String; 3] {
+    let mut keys = [String::new(), String::new(), String::new()];
+
+    if let Ok(content) = fs::read_to_string(env_file_path()) {
+        for line in content.lines() {
+            let line = line.trim();
+            for (i, name) in ENV_VAR_NAMES.iter().enumerate() {
+                if let Some(val) = line.strip_prefix(&format!("{}=", name)) {
+                    keys[i] = val.to_string();
+                }
+            }
+        }
+    }
+
+    for (i, name) in ENV_VAR_NAMES.iter().enumerate() {
+        if keys[i].is_empty() {
+            keys[i] = env::var(name).unwrap_or_default();
+        }
+    }
+
+    keys
+}
+
+pub fn save_api_keys(keys: &[String; 3]) {
+    let dir = config_dir();
+    let _ = fs::create_dir_all(&dir);
+
+    let mut content = String::new();
+    for (i, name) in ENV_VAR_NAMES.iter().enumerate() {
+        if !keys[i].is_empty() {
+            content.push_str(&format!("{}={}\n", name, keys[i]));
+        }
+    }
+
+    let _ = fs::write(env_file_path(), content);
+
+    for (i, name) in ENV_VAR_NAMES.iter().enumerate() {
+        if !keys[i].is_empty() {
+            env::set_var(name, &keys[i]);
+        } else {
+            env::remove_var(name);
+        }
+    }
+}
+
+pub fn open_provider_url(index: usize) {
+    if index >= PROVIDER_FULL_URLS.len() {
+        return;
+    }
+    open_url(PROVIDER_FULL_URLS[index]);
+}
+
+fn open_url(url: &str) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(url).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    }
 }

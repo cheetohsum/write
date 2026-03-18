@@ -1,8 +1,11 @@
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod app;
 mod config;
 mod editor;
 mod keybindings;
 mod llm;
+mod platform;
 mod theme;
 mod ui;
 
@@ -17,6 +20,9 @@ use ratatui::Terminal;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Set up standalone console window (Windows only, no-op on other platforms)
+    platform::setup();
+
     // Set up panic hook to restore terminal
     let original_hook = panic::take_hook();
     panic::set_hook(Box::new(move |info| {

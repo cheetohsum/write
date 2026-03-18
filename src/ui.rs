@@ -24,6 +24,7 @@ pub fn render(f: &mut Frame, state: &mut AppState) {
 
     match state.screen {
         Screen::Startup => render_startup(f, state, area),
+        Screen::Settings => render_settings(f, state, area),
         Screen::Editor => render_editor(f, state, area),
         Screen::QuitConfirm => {
             render_editor(f, state, area);
@@ -32,7 +33,7 @@ pub fn render(f: &mut Frame, state: &mut AppState) {
     }
 
     // Startup reveal animation
-    if state.screen == Screen::Startup {
+    if matches!(state.screen, Screen::Startup | Screen::Settings) {
         if let Some(ref anim) = state.startup_anim {
             let elapsed = anim.start.elapsed().as_millis() as u64;
             if elapsed < 900 {
@@ -185,21 +186,188 @@ fn render_startup(f: &mut Frame, state: &mut AppState, area: Rect) {
         None => "no API key".to_string(),
     };
 
+    let key_style = Style::default().fg(theme::MAROON).bg(theme::PARCHMENT);
+    let settings_style = if state.startup_field == 2 {
+        Style::default()
+            .fg(theme::CREAM)
+            .bg(theme::TERRACOTTA)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        theme::hint()
+    };
+
     f.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("  ", theme::base()),
             Span::styled(&provider_text, theme::hint()),
-            Span::styled("    ", theme::base()),
-            Span::styled("tab", Style::default().fg(theme::MAROON).bg(theme::PARCHMENT)),
+            Span::styled("  ", theme::base()),
+            Span::styled("tab", key_style),
             Span::styled(" · ", theme::hint()),
-            Span::styled(
-                "enter",
-                Style::default().fg(theme::MAROON).bg(theme::PARCHMENT),
-            ),
+            Span::styled("enter", key_style),
             Span::styled(" · ", theme::hint()),
-            Span::styled("esc", Style::default().fg(theme::MAROON).bg(theme::PARCHMENT)),
+            Span::styled(" ⚙ settings ", settings_style),
+            Span::styled(" · ", theme::hint()),
+            Span::styled("esc", key_style),
         ])),
         form_chunks[14],
+    );
+}
+
+fn render_settings(f: &mut Frame, state: &mut AppState, area: Rect) {
+    let chunks = Layout::vertical([
+        Constraint::Min(1),
+        Constraint::Length(22),
+        Constraint::Min(1),
+    ])
+    .split(area);
+
+    let form_area = centered_rect(55, chunks[1]);
+    let deco_width = form_area.width as usize;
+
+    let form_chunks = Layout::vertical([
+        Constraint::Length(1), // [0] top decorative line
+        Constraint::Length(1), // [1] blank
+        Constraint::Length(1), // [2] "settings" title
+        Constraint::Length(1), // [3] subtitle
+        Constraint::Length(1), // [4] blank
+        Constraint::Length(1), // [5] mid decorative line
+        Constraint::Length(1), // [6] Anthropic label + link
+        Constraint::Length(3), // [7] Anthropic input
+        Constraint::Length(1), // [8] OpenAI label + link
+        Constraint::Length(3), // [9] OpenAI input
+        Constraint::Length(1), // [10] OpenRouter label + link
+        Constraint::Length(3), // [11] OpenRouter input
+        Constraint::Length(1), // [12] blank
+        Constraint::Length(1), // [13] bottom decorative line
+        Constraint::Length(1), // [14] blank
+        Constraint::Length(1), // [15] hints bar
+    ])
+    .split(form_area);
+
+    // Top decorative line
+    let top_line = "━".repeat(deco_width);
+    f.render_widget(
+        Paragraph::new(Span::styled(&top_line, theme::decorative_line())),
+        form_chunks[0],
+    );
+
+    // Title
+    f.render_widget(
+        Paragraph::new(Line::from(vec![Span::styled(
+            "settings",
+            Style::default()
+                .fg(theme::MAROON)
+                .bg(theme::PARCHMENT)
+                .add_modifier(Modifier::BOLD),
+        )]))
+        .alignment(Alignment::Center),
+        form_chunks[2],
+    );
+
+    // Subtitle
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("── ", theme::decorative_line_subtle()),
+            Span::styled("API keys", theme::secondary()),
+            Span::styled(" ──", theme::decorative_line_subtle()),
+        ]))
+        .alignment(Alignment::Center),
+        form_chunks[3],
+    );
+
+    // Mid decorative line
+    let mid_line = "─".repeat(deco_width);
+    f.render_widget(
+        Paragraph::new(Span::styled(&mid_line, theme::decorative_line_subtle())),
+        form_chunks[5],
+    );
+
+    // Provider fields
+    let label_indices = [6, 8, 10];
+    let input_indices = [7, 9, 11];
+    let link_style = Style::default()
+        .fg(theme::TERRACOTTA)
+        .bg(theme::PARCHMENT)
+        .add_modifier(Modifier::UNDERLINED);
+
+    for i in 0..3 {
+        let label_chunk = form_chunks[label_indices[i]];
+        let input_chunk = form_chunks[input_indices[i]];
+
+        // Label row: split into label (left) and link (right)
+        let link_text = crate::config::PROVIDER_URLS[i];
+        let link_display = format!("{} ↗", link_text);
+        let link_width = link_display.chars().count() as u16 + 1; // +1 for padding
+
+        let label_link_chunks = Layout::horizontal([
+            Constraint::Min(1),
+            Constraint::Length(link_width),
+        ])
+        .split(label_chunk);
+
+        // Label
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                format!("  {}", crate::config::PROVIDER_NAMES[i]),
+                theme::label(),
+            )),
+            label_link_chunks[0],
+        );
+
+        // Link button
+        f.render_widget(
+            Paragraph::new(Span::styled(&link_display, link_style)),
+            label_link_chunks[1],
+        );
+
+        // Store link rect for mouse click handling
+        state.settings_link_rects[i] = label_link_chunks[1];
+
+        // Input field
+        let is_active = state.settings_field == i as u8;
+        let border_style = if is_active {
+            theme::border_active()
+        } else {
+            theme::border()
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(border_style)
+            .style(theme::base());
+
+        if is_active {
+            state.settings_inputs[i].set_block(block);
+            state.settings_inputs[i].set_cursor_style(theme::cursor());
+            state.settings_inputs[i].set_style(theme::input_active());
+        } else {
+            state.settings_inputs[i].set_block(block);
+            state.settings_inputs[i]
+                .set_cursor_style(ratatui::style::Style::default());
+            state.settings_inputs[i].set_style(theme::input_inactive());
+        }
+        f.render_widget(&state.settings_inputs[i], input_chunk);
+    }
+
+    // Bottom decorative line
+    f.render_widget(
+        Paragraph::new(Span::styled(&mid_line, theme::decorative_line_subtle())),
+        form_chunks[13],
+    );
+
+    // Hints bar
+    let key_style = Style::default().fg(theme::MAROON).bg(theme::PARCHMENT);
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("  ", theme::base()),
+            Span::styled("tab", key_style),
+            Span::styled(" switch  ", theme::hint()),
+            Span::styled("^O", key_style),
+            Span::styled(" open link  ", theme::hint()),
+            Span::styled("esc", key_style),
+            Span::styled(" back", theme::hint()),
+        ])),
+        form_chunks[15],
     );
 }
 
@@ -426,11 +594,12 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
         Span::styled(" all  ", cmd_style),
         Span::styled("^L", key_style),
         Span::styled(" llm  ", cmd_style),
+        Span::styled("Esc", key_style),
     ];
     if state.is_nested() {
-        cmd_spans.push(Span::styled("Esc", key_style));
-        cmd_spans.push(Span::styled(" back", cmd_style));
+        cmd_spans.push(Span::styled(" back  ", cmd_style));
     } else {
+        cmd_spans.push(Span::styled(" back  ", cmd_style));
         cmd_spans.push(Span::styled("^Q", key_style));
         cmd_spans.push(Span::styled(" quit", cmd_style));
     }

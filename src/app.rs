@@ -31,6 +31,7 @@ const TRANSITION_MS: u64 = 350;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Screen {
     Startup,
+    Settings,
     Editor,
     QuitConfirm,
 }
@@ -109,6 +110,10 @@ pub struct AppState<'a> {
     pub current_file: PathBuf,
     pub current_page_name: String,
     pub page_stack: Vec<PageEntry>,
+    // Settings screen
+    pub settings_field: u8,
+    pub settings_inputs: [TextArea<'a>; 3],
+    pub settings_link_rects: [Rect; 3],
 }
 
 impl<'a> AppState<'a> {
@@ -162,6 +167,13 @@ impl<'a> AppState<'a> {
             current_file: PathBuf::new(),
             current_page_name: String::new(),
             page_stack: Vec::new(),
+            settings_field: 0,
+            settings_inputs: [
+                TextArea::default(),
+                TextArea::default(),
+                TextArea::default(),
+            ],
+            settings_link_rects: [Rect::default(); 3],
         }
     }
 
@@ -190,15 +202,11 @@ pub async fn run(
 ) -> Result<()> {
     let mut state = AppState::new(llm_config.clone());
 
-    let (llm_tx, mut llm_rx): (
+    // LLM channels are created on demand when entering the editor
+    let (mut llm_tx, mut llm_rx): (
         Option<mpsc::Sender<LlmRequest>>,
         Option<mpsc::Receiver<LlmResponse>>,
-    ) = if let Some(ref cfg) = llm_config {
-        let (tx, rx) = llm::spawn_llm_task(cfg.clone());
-        (Some(tx), Some(rx))
-    } else {
-        (None, None)
-    };
+    ) = (None, None);
 
     loop {
         let term_width = terminal.size()?.width;
@@ -305,15 +313,49 @@ pub async fn run(
 
                     state.last_keypress = Instant::now();
 
-
-
+                    let prev_screen = state.screen.clone();
                     handle_key(&mut state, key)?;
+
+                    // Handle screen transitions
+                    if prev_screen != state.screen {
+                        match (&prev_screen, &state.screen) {
+                            (_, Screen::Editor) => {
+                                // Entering editor — spawn LLM if configured
+                                if let Some(ref cfg) = state.llm_config {
+                                    let (tx, rx) = llm::spawn_llm_task(cfg.clone());
+                                    llm_tx = Some(tx);
+                                    llm_rx = Some(rx);
+                                }
+                            }
+                            (Screen::Editor, _) => {
+                                // Leaving editor — drop LLM channels
+                                llm_tx = None;
+                                llm_rx = None;
+                            }
+                            _ => {}
+                        }
+                    }
 
                     if state.should_quit {
                         break;
                     }
                 }
                 Event::Mouse(mouse) => {
+                    // Settings screen: click links to open provider URLs
+                    if state.screen == Screen::Settings
+                        && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+                    {
+                        for (i, rect) in state.settings_link_rects.iter().enumerate() {
+                            if rect.width > 0
+                                && mouse.column >= rect.left()
+                                && mouse.column < rect.right()
+                                && mouse.row >= rect.top()
+                                && mouse.row < rect.bottom()
+                            {
+                                crate::config::open_provider_url(i);
+                            }
+                        }
+                    }
                     if state.screen == Screen::Editor
                         && state.transition.is_none()
                         && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
@@ -382,6 +424,7 @@ pub async fn run(
 fn handle_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
     match state.screen {
         Screen::Startup => handle_startup_key(state, key),
+        Screen::Settings => handle_settings_key(state, key),
         Screen::Editor => handle_editor_key(state, key),
         Screen::QuitConfirm => handle_modal_key(state, key),
     }
@@ -391,9 +434,20 @@ fn handle_startup_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
     let action = keybindings::map_startup_key(key);
     match action {
         Action::Tab => {
-            state.startup_field = if state.startup_field == 0 { 1 } else { 0 };
+            state.startup_field = (state.startup_field + 1) % 3;
         }
         Action::Confirm => {
+            if state.startup_field == 2 {
+                // Open settings
+                init_settings_inputs(state);
+                state.screen = Screen::Settings;
+                state.transition = Some(TransitionAnim {
+                    start: Instant::now(),
+                    style: RevealStyle::Scatter,
+                });
+                return Ok(());
+            }
+
             let dir = state.dir_input.lines().join("");
             let title = state.title_input.lines().join("");
 
@@ -427,9 +481,10 @@ fn handle_startup_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
         Action::ForwardToEditor(key_event) => {
             if state.startup_field == 0 {
                 state.dir_input.input(key_event);
-            } else {
+            } else if state.startup_field == 1 {
                 state.title_input.input(key_event);
             }
+            // field 2 (settings button): ignore text input
         }
         _ => {}
     }
@@ -442,11 +497,15 @@ fn handle_editor_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
         Action::Save => {
             save_document(state)?;
         }
-        Action::Quit => {
+        Action::Back => {
             if state.is_nested() {
-                // Go back to parent page
                 navigate_back(state)?;
-            } else if state.editor.modified {
+            } else {
+                return_to_startup(state)?;
+            }
+        }
+        Action::Quit => {
+            if state.editor.modified {
                 state.screen = Screen::QuitConfirm;
             } else {
                 state.should_quit = true;
@@ -529,6 +588,89 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
         }
         _ => {}
     }
+    Ok(())
+}
+
+// --- Settings ---
+
+fn handle_settings_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
+    let action = keybindings::map_settings_key(key);
+    match action {
+        Action::Tab => {
+            state.settings_field = (state.settings_field + 1) % 3;
+        }
+        Action::Back => {
+            save_settings(state);
+            state.screen = Screen::Startup;
+            state.transition = Some(TransitionAnim {
+                start: Instant::now(),
+                style: RevealStyle::ZoomOut,
+            });
+        }
+        Action::Quit => {
+            save_settings(state);
+            state.should_quit = true;
+        }
+        Action::OpenUrl => {
+            crate::config::open_provider_url(state.settings_field as usize);
+        }
+        Action::ForwardToEditor(key_event) => {
+            let idx = state.settings_field as usize;
+            state.settings_inputs[idx].input(key_event);
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn init_settings_inputs(state: &mut AppState) {
+    let keys = crate::config::load_saved_keys();
+    for (i, key) in keys.iter().enumerate() {
+        state.settings_inputs[i].select_all();
+        state.settings_inputs[i].cut();
+        if !key.is_empty() {
+            state.settings_inputs[i].insert_str(key);
+        }
+    }
+    state.settings_field = 0;
+}
+
+fn save_settings(state: &mut AppState) {
+    let keys = [
+        state.settings_inputs[0].lines().join(""),
+        state.settings_inputs[1].lines().join(""),
+        state.settings_inputs[2].lines().join(""),
+    ];
+    crate::config::save_api_keys(&keys);
+    state.llm_config = crate::config::load_config();
+    state.llm_enabled = state.llm_config.is_some();
+    state.llm_status = if state.llm_config.is_some() {
+        LlmStatus::Idle
+    } else {
+        LlmStatus::Disabled
+    };
+}
+
+fn return_to_startup(state: &mut AppState) -> Result<()> {
+    // Auto-save if there's content
+    if state.editor.modified && !state.editor.content().trim().is_empty() {
+        save_document(state)?;
+    }
+    state.screen = Screen::Startup;
+    state.editor = EditorState::new();
+    state.page_stack.clear();
+    state.current_file = PathBuf::new();
+    state.current_page_name = String::new();
+    state.in_flight = false;
+    state.llm_status = if state.llm_config.is_some() {
+        LlmStatus::Idle
+    } else {
+        LlmStatus::Disabled
+    };
+    state.transition = Some(TransitionAnim {
+        start: Instant::now(),
+        style: RevealStyle::ZoomOut,
+    });
     Ok(())
 }
 
