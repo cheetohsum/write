@@ -4,10 +4,11 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use tui_textarea::CursorMove;
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
 use ratatui::Terminal;
+use tui_textarea::CursorMove;
 use tokio::sync::mpsc;
 use tui_textarea::TextArea;
 
@@ -93,6 +94,7 @@ pub struct AppState<'a> {
     pub words_since_send: u8,
     pub startup_anim: Option<StartupAnim>,
     pub transition: Option<TransitionAnim>,
+    pub editor_area: Rect,
     // Graph-node navigation
     pub current_file: PathBuf,
     pub current_page_name: String,
@@ -139,6 +141,7 @@ impl<'a> AppState<'a> {
             in_flight: false,
             should_quit: false,
             words_since_send: 0,
+            editor_area: Rect::default(),
             startup_anim: Some(StartupAnim {
                 start: Instant::now(),
             }),
@@ -293,9 +296,44 @@ pub async fn run(
                     }
                 }
                 Event::Mouse(mouse) => {
-                    if state.screen == Screen::Editor && state.transition.is_none() {
-                        // Forward all mouse events to textarea for cursor + selection
-                        state.editor.textarea.input(Event::Mouse(mouse));
+                    if state.screen == Screen::Editor
+                        && state.transition.is_none()
+                        && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+                    {
+                        let area = state.editor_area;
+                        if mouse.column >= area.left()
+                            && mouse.column < area.right()
+                            && mouse.row >= area.top()
+                            && mouse.row < area.bottom()
+                        {
+                            let click_row = (mouse.row - area.top()) as usize;
+                            let click_col = (mouse.column - area.left()) as usize;
+
+                            // Estimate scroll offset from cursor position
+                            let (cur_row, _) = state.editor.textarea.cursor();
+                            let viewport_h = area.height as usize;
+                            let scroll_top = cur_row.saturating_sub(viewport_h.saturating_sub(1));
+                            let target_row = scroll_top + click_row;
+                            let line_count = state.editor.textarea.lines().len();
+                            let target_row = target_row.min(line_count.saturating_sub(1));
+
+                            state.editor.textarea.move_cursor(CursorMove::Top);
+                            state.editor.textarea.move_cursor(CursorMove::Head);
+                            for _ in 0..target_row {
+                                state.editor.textarea.move_cursor(CursorMove::Down);
+                            }
+                            let line_len = state
+                                .editor
+                                .textarea
+                                .lines()
+                                .get(target_row)
+                                .map(|l| l.len())
+                                .unwrap_or(0);
+                            let target_col = click_col.min(line_len);
+                            for _ in 0..target_col {
+                                state.editor.textarea.move_cursor(CursorMove::Forward);
+                            }
+                        }
                     }
                 }
                 _ => {}
@@ -396,8 +434,14 @@ fn handle_editor_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
             navigate_into_link(state)?;
         }
         Action::ForwardToEditor(key_event) => {
+            // Ctrl+A: select all (tui-textarea maps it to head-of-line)
+            if matches!(
+                (key_event.code, key_event.modifiers),
+                (KeyCode::Char('a'), KeyModifiers::CONTROL)
+            ) {
+                state.editor.textarea.select_all();
             // Down arrow: move down then jump to end of that line
-            if matches!(key_event.code, KeyCode::Down) {
+            } else if matches!(key_event.code, KeyCode::Down) {
                 state.editor.textarea.input(key_event);
                 state.editor.textarea.move_cursor(CursorMove::End);
             } else {

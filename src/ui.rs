@@ -205,15 +205,26 @@ fn render_startup(f: &mut Frame, state: &mut AppState, area: Rect) {
 
 fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
     let chunks = Layout::vertical([
+        Constraint::Length(1), // top padding
         Constraint::Length(1), // title bar
         Constraint::Min(1),   // editor
-        Constraint::Length(1), // status bar
+        Constraint::Length(1), // info bar
+        Constraint::Length(1), // command bar
     ])
     .split(area);
 
-    // --- Centered title bar ---
+    // --- Top padding (parchment) ---
+    f.render_widget(Block::default().style(theme::base()), chunks[0]);
+
+    // --- Centered title bar with icon ---
     let breadcrumb = state.breadcrumb();
     let title_line = Line::from(vec![
+        Span::styled(
+            "◆ ",
+            Style::default()
+                .fg(theme::GOLD)
+                .bg(theme::UMBER),
+        ),
         Span::styled(
             "write",
             Style::default()
@@ -239,7 +250,7 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
         Paragraph::new(title_line)
             .style(theme::title_bar())
             .alignment(Alignment::Center),
-        chunks[0],
+        chunks[1],
     );
 
     // --- Editor with borders and padding ---
@@ -250,7 +261,10 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
         Constraint::Length(4), // right padding
         Constraint::Length(1), // right border
     ])
-    .split(chunks[1]);
+    .split(chunks[2]);
+
+    // Store editor area for mouse click mapping
+    state.editor_area = editor_outer[2];
 
     // Left border
     for y in editor_outer[0].top()..editor_outer[0].bottom() {
@@ -278,7 +292,7 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Markdown rich text styling
     style_markdown(f.buffer_mut(), editor_outer[2]);
 
-    // --- Centered status bar ---
+    // --- Info bar (word count + LLM status) ---
     let llm_status_text = match state.llm_status {
         LlmStatus::Disabled => "LLM off",
         LlmStatus::Idle => "LLM idle",
@@ -297,14 +311,9 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
         _ => theme::SANDSTONE,
     };
 
-    let save_text = if state.just_saved { "saved" } else { "" };
-    let hints = if state.is_nested() {
-        "^S ^G ^O  Esc back  ^L"
-    } else {
-        "^S ^G ^O  ^Q  ^L"
-    };
+    let save_text = if state.just_saved { " saved " } else { "" };
 
-    let status_line = Line::from(vec![
+    let info_line = Line::from(vec![
         Span::styled(
             save_text,
             Style::default()
@@ -318,15 +327,48 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
         ),
         Span::styled("│ ", Style::default().fg(theme::CLAY).bg(theme::UMBER)),
         Span::styled("● ", Style::default().fg(llm_dot_color).bg(theme::UMBER)),
-        Span::styled(format!("{} ", llm_status_text), theme::status_bar()),
-        Span::styled("│ ", Style::default().fg(theme::CLAY).bg(theme::UMBER)),
-        Span::styled(hints, Style::default().fg(theme::CLAY).bg(theme::UMBER)),
+        Span::styled(llm_status_text, theme::status_bar()),
     ]);
     f.render_widget(
-        Paragraph::new(status_line)
+        Paragraph::new(info_line)
             .style(theme::status_bar())
             .alignment(Alignment::Center),
-        chunks[2],
+        chunks[3],
+    );
+
+    // --- Command bar (keybinding descriptions) ---
+    let cmd_style = Style::default().fg(theme::CLAY).bg(theme::UMBER);
+    let key_style = Style::default()
+        .fg(theme::CREAM)
+        .bg(theme::UMBER)
+        .add_modifier(Modifier::BOLD);
+
+    let mut cmd_spans = vec![
+        Span::styled("✎ ", Style::default().fg(theme::GOLD).bg(theme::UMBER)),
+        Span::styled("^S", key_style),
+        Span::styled(" save  ", cmd_style),
+        Span::styled("^G", key_style),
+        Span::styled(" link  ", cmd_style),
+        Span::styled("^O", key_style),
+        Span::styled(" open  ", cmd_style),
+        Span::styled("^A", key_style),
+        Span::styled(" select all  ", cmd_style),
+        Span::styled("^L", key_style),
+        Span::styled(" llm  ", cmd_style),
+    ];
+    if state.is_nested() {
+        cmd_spans.push(Span::styled("Esc", key_style));
+        cmd_spans.push(Span::styled(" back", cmd_style));
+    } else {
+        cmd_spans.push(Span::styled("^Q", key_style));
+        cmd_spans.push(Span::styled(" quit", cmd_style));
+    }
+
+    f.render_widget(
+        Paragraph::new(Line::from(cmd_spans))
+            .style(theme::status_bar())
+            .alignment(Alignment::Center),
+        chunks[4],
     );
 }
 
