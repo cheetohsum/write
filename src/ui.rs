@@ -66,18 +66,18 @@ fn render_startup(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     let form_chunks = Layout::vertical([
         Constraint::Length(1), // [0] ✧ icon
-        Constraint::Length(1), // [1] decorative top line
-        Constraint::Length(1), // [2] title "write"
-        Constraint::Length(1), // [3] subtitle
+        Constraint::Length(1), // [1] gold top line
+        Constraint::Length(1), // [2] blank
+        Constraint::Length(1), // [3] title "write"
         Constraint::Length(1), // [4] blank
-        Constraint::Length(1), // [5] decorative mid line
+        Constraint::Length(1), // [5] gold mid line
         Constraint::Length(1), // [6] blank
         Constraint::Length(1), // [7] dir label
         Constraint::Length(3), // [8] dir input
         Constraint::Length(1), // [9] title label
         Constraint::Length(3), // [10] title input
         Constraint::Length(1), // [11] blank
-        Constraint::Length(1), // [12] decorative bottom line
+        Constraint::Length(1), // [12] gold bottom line
         Constraint::Length(1), // [13] blank
         Constraint::Length(1), // [14] provider + keybindings
     ])
@@ -98,10 +98,10 @@ fn render_startup(f: &mut Frame, state: &mut AppState, area: Rect) {
         form_chunks[0],
     );
 
-    // Gold decorative line
-    let top_line = "━".repeat(deco_width);
+    // Gold decorative lines
+    let gold_line = "━".repeat(deco_width);
     f.render_widget(
-        Paragraph::new(Span::styled(&top_line, theme::decorative_line())),
+        Paragraph::new(Span::styled(&gold_line, theme::decorative_line())),
         form_chunks[1],
     );
 
@@ -114,22 +114,12 @@ fn render_startup(f: &mut Frame, state: &mut AppState, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         )]))
         .alignment(Alignment::Center),
-        form_chunks[2],
-    );
-
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("── ", theme::decorative_line_subtle()),
-            Span::styled("a writing tool", theme::secondary()),
-            Span::styled(" ──", theme::decorative_line_subtle()),
-        ]))
-        .alignment(Alignment::Center),
         form_chunks[3],
     );
 
     let mid_line = "─".repeat(deco_width);
     f.render_widget(
-        Paragraph::new(Span::styled(&mid_line, theme::decorative_line_subtle())),
+        Paragraph::new(Span::styled(&mid_line, theme::decorative_line())),
         form_chunks[5],
     );
 
@@ -194,7 +184,7 @@ fn render_startup(f: &mut Frame, state: &mut AppState, area: Rect) {
     f.render_widget(&state.title_input, form_chunks[10]);
 
     f.render_widget(
-        Paragraph::new(Span::styled(&mid_line, theme::decorative_line_subtle())),
+        Paragraph::new(Span::styled(&mid_line, theme::decorative_line())),
         form_chunks[12],
     );
 
