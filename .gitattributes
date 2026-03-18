@@ -1,0 +1,6 @@
+# Prevent git line-ending conversion on binary files
+*.ico binary
+*.png binary
+*.icns binary
+*.exe binary
+*.dmg binary

@@ -5,7 +5,7 @@
 <h1 align="center">Write</h1>
 
 <p align="center">
-  A distraction-free terminal editor that silently polishes your prose as you type.
+  A distraction-free writing app that silently fixes your spelling as you type.
 </p>
 
 <p align="center">
@@ -16,31 +16,32 @@
 
 ---
 
-Write is a terminal-based markdown editor built in Rust. As you write, an LLM works in the background to fix typos, grammar, and formatting — so you never break flow. Documents save as `.md` files.
+Write is a standalone writing application built in Rust. It opens its own window — double-click the exe, start writing. An LLM runs in the background to fix typos and spelling mistakes using surrounding context, so you never break flow. Documents save as `.md` files.
 
-The interface uses a warm **Taliesin** color scheme inspired by Frank Lloyd Wright's prairie aesthetic: parchment backgrounds, walnut text, terracotta and maroon accents, gold decorative lines.
+The interface uses a warm **Taliesin** color scheme inspired by Frank Lloyd Wright's prairie aesthetic: parchment backgrounds, walnut text, terracotta and gold accents.
 
 ## Features
 
-- **Proactive LLM cleanup** — typos, grammar, and markdown formatting are corrected automatically in the background
-- **Screenplay formatting** — scene headings, character names, dialogue, camera directions, transitions, and shots are recognized and formatted to standard conventions
-- **Scramble animation** — corrected characters cycle through random letters before resolving, with each character settling independently
-- **Dither transitions** — startup and screen changes use a block-character dissolve effect
-- **Word wrap** — text wraps at the terminal edge automatically
-- **Three LLM providers** — Claude (Anthropic), OpenAI, and OpenRouter with automatic detection
-- **Smart triggers** — LLM fires on sentence boundaries (300ms), word boundaries (800ms), or idle (2s)
-- **Hash-based staleness** — if you type while the LLM is working, stale responses are discarded
-- **Zero config** — works as a plain editor with no API key; just set one to enable cleanup
+- **Context-aware spell correction** — uses surrounding words to pick the right fix (e.g. "Hen I got home" → "When", not "Hen")
+- **Respects your voice** — won't rewrite prose, change style, or take creative liberty
+- **Standalone window** — opens as its own app with themed title bar and icon (not inside cmd.exe)
+- **Settings screen** — configure API keys, choose preferred provider, browse OpenRouter models
+- **Scramble animation** — corrected characters dissolve through random glyphs before resolving
+- **Graph-node links** — `[[wiki-links]]` for building interconnected documents
+- **Scroll indicator** — gold position marker appears in the left margin on long documents
+- **Three LLM providers** — Claude (Anthropic), OpenAI, and OpenRouter
+- **Smart triggers** — fires on sentence boundaries (300ms), word gaps (600ms), or idle (1.5s)
+- **Zero config** — works as a plain editor with no API key; set one to enable spell correction
 
 ## Installation
 
-Download the latest binary from [Releases](https://github.com/cheetohsum/write/releases/latest):
+Download from [Releases](https://github.com/cheetohsum/write/releases/latest):
 
-| Platform | Asset |
-|----------|-------|
-| Windows x86_64 | `Write-windows-x86_64.exe` |
-| macOS Apple Silicon | `Write-macos-aarch64.zip` |
-| macOS Intel | `Write-macos-x86_64.zip` |
+| Platform | Download |
+|----------|----------|
+| Windows x86_64 | `Write-windows-x86_64.zip` |
+| macOS Apple Silicon | `Write-macos-aarch64.dmg` |
+| macOS Intel | `Write-macos-x86_64.dmg` |
 
 Or build from source:
 
@@ -50,104 +51,103 @@ cd write
 cargo build --release
 ```
 
+## Getting Started
+
+1. Launch Write
+2. Go to **Settings** (Tab to ⚙ settings, press Enter)
+3. Enter an API key for any provider — click the **✦ Keys** button to open the signup page
+4. Press Enter on a provider to set it as preferred (◆ indicator)
+5. Press Esc to save and return to the title screen
+6. Enter a document title and start writing
+
+API keys are saved to your system config directory and persist across sessions.
+
 ## Configuration
 
-Create a `.env` file in the project directory:
+Settings are managed in-app (Tab → ⚙ settings on the title screen). Keys are stored in:
 
-```
-ANTHROPIC_API_KEY=sk-ant-...
-```
+- **Windows:** `%APPDATA%\write\.env`
+- **macOS:** `~/Library/Application Support/write/.env`
 
-The app auto-detects which provider to use based on available keys. Priority: `ANTHROPIC_API_KEY` → `OPENAI_API_KEY` → `OPENROUTER_API_KEY`.
+You can also set environment variables directly:
 
 | Variable | Purpose |
 |----------|---------|
-| `ANTHROPIC_API_KEY` | Claude API (preferred) |
+| `ANTHROPIC_API_KEY` | Claude API |
 | `OPENAI_API_KEY` | OpenAI API |
 | `OPENROUTER_API_KEY` | OpenRouter API |
 | `LLM_PROVIDER` | Force a provider (`claude`, `openai`, `openrouter`) |
-| `LLM_MODEL` | Override the default model |
+| `LLM_MODEL` | Override the default model (useful for OpenRouter) |
 
 ## Keybindings
+
+### Title Screen
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Cycle fields (directory → title → settings) |
+| `Enter` | Open document / enter settings |
+| `Esc` | Quit |
+
+### Editor
 
 | Key | Action |
 |-----|--------|
 | `Ctrl+S` | Save document |
-| `Ctrl+Q` / `Esc` | Quit (confirms if unsaved) |
+| `Esc` | Back to title screen (auto-saves) |
+| `Ctrl+Q` | Quit application |
 | `Ctrl+G` | Wrap word under cursor in `[[wiki-link]]` |
-| `Ctrl+O` | Open/navigate into `[[link]]` under cursor |
-| `Esc` | Go back to parent page (when inside a linked page) |
+| `Ctrl+O` | Navigate into `[[link]]` under cursor |
 | `Ctrl+L` | Toggle LLM on/off |
-| `Tab` | Switch fields (startup screen) |
-| `Enter` | Begin writing (startup screen) |
+| `Ctrl+A` | Select all text |
+
+### Settings
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Cycle fields (3 providers → model) |
+| `Enter` | Set provider as preferred (◆) |
+| `↑` `↓` / scroll | Browse OpenRouter models |
+| `Esc` | Save and return to title screen |
 
 ## Graph-Node Links
 
-Write supports `[[wiki-links]]` for building a graph of interconnected documents — characters, locations, concepts, or anything you want to describe in its own page.
+Write supports `[[wiki-links]]` for building interconnected documents.
 
-**Creating a link:** Place your cursor on any proper noun and press `Ctrl+G`. The word wraps in `[[brackets]]` and renders as **bold maroon** text in the editor.
+- **Create:** Place cursor on a word → `Ctrl+G` → wraps in `[[brackets]]`
+- **Navigate:** Cursor on a `[[link]]` → `Ctrl+O` → zooms into the linked page
+- **Back:** `Esc` saves the linked page and returns to the parent
 
-**Navigating into a link:** Move the cursor onto a `[[link]]` and press `Ctrl+O`. The screen zooms in with a radial dither animation, and you enter the linked page to write its content. The title bar shows a breadcrumb trail: `my-essay.md > Character Name`.
-
-**Going back:** Press `Esc` to save the linked page and zoom back out to the parent document. Your cursor returns to where you left off.
-
-**File structure:** linked pages are stored alongside your document:
+Linked pages are stored alongside your document:
 
 ```
 ~/Documents/
-├── my-essay.md              ← main document with [[links]]
+├── my-essay.md
 └── my-essay/
-    ├── Character Name.md    ← linked page
-    ├── Location.md
-    └── ...
+    ├── Character Name.md
+    └── Location.md
 ```
 
-This structure is compatible with Obsidian, Logseq, and other wiki-link tools.
-
-## Screenplay Support
-
-Write recognizes standard screenplay elements and formats them automatically:
-
-```markdown
-**FADE IN:**
-
-**EXT. DESERT HIGHWAY - DAY**
-
-A heat shimmer ripples across empty asphalt stretching to the horizon.
-
-**WIDE SHOT**
-
-A single car appears in the distance.
-
-**JACK**
-*(squinting)*
-We should have turned left at Albuquerque.
-
-**MARIA**
-That's what I said three hours ago.
-
-**CUT TO:**
-```
-
-Supported elements: scene headings (INT./EXT.), character names, dialogue, parentheticals, transitions (CUT TO, FADE IN/OUT, SMASH CUT), camera directions (CLOSE UP, WIDE SHOT, PAN, TRACKING SHOT, POV, OVER THE SHOULDER), shot descriptions (ANGLE ON, INSERT, MONTAGE), and continuation markers.
+Compatible with Obsidian, Logseq, and other wiki-link tools.
 
 ## Architecture
 
 ```
 src/
 ├── main.rs          # Terminal setup, panic hook
+├── platform.rs      # Windows standalone window (conhost, DWM theming, icon)
 ├── app.rs           # State machine, event loop, animations
-├── ui.rs            # Ratatui rendering, dither overlays
+├── ui.rs            # Ratatui rendering, scroll indicator, dither overlays
 ├── editor.rs        # TextArea wrapper, word wrap, content replacement
 ├── theme.rs         # Taliesin color palette
-├── config.rs        # Env loading, provider detection
+├── config.rs        # Settings persistence, folder picker, provider detection
 ├── keybindings.rs   # Key → Action dispatch
 └── llm/
     ├── mod.rs       # Background task, mpsc channels
     ├── claude.rs    # Anthropic Messages API
     ├── openai.rs    # OpenAI Chat Completions API
     ├── openrouter.rs
-    └── prompt.rs    # System prompt with screenplay rules
+    └── prompt.rs    # Proofreading system prompt
 ```
 
 ## Color Palette

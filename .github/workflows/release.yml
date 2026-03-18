@@ -82,6 +82,9 @@ jobs:
           mkdir -p dmg_staging
           cp -r Write.app dmg_staging/
           ln -s /Applications dmg_staging/Applications
+          # Set volume icon from the app icon
+          cp Write.app/Contents/Resources/icon.icns dmg_staging/.VolumeIcon.icns
+          SetFile -a C dmg_staging || true
           hdiutil create -volname "Write" -srcfolder dmg_staging -ov -format UDZO Write-macos-aarch64.dmg
 
       - uses: actions/upload-artifact@v4
@@ -128,6 +131,8 @@ jobs:
           mkdir -p dmg_staging
           cp -r Write.app dmg_staging/
           ln -s /Applications dmg_staging/Applications
+          cp Write.app/Contents/Resources/icon.icns dmg_staging/.VolumeIcon.icns
+          SetFile -a C dmg_staging || true
           hdiutil create -volname "Write" -srcfolder dmg_staging -ov -format UDZO Write-macos-x86_64.dmg
 
       - uses: actions/upload-artifact@v4
