@@ -117,6 +117,8 @@ pub struct AppState<'a> {
     pub settings_input_rects: [Rect; 4],
     pub preferred_provider: Option<u8>,
     pub model_input: TextArea<'a>,
+    pub openrouter_models: Vec<String>,
+    pub model_selected: usize,
     // Startup screen click areas
     pub dir_input_rect: Rect,
 }
@@ -182,6 +184,8 @@ impl<'a> AppState<'a> {
             settings_input_rects: [Rect::default(); 4],
             preferred_provider: crate::config::load_preferred_provider(),
             model_input: TextArea::default(),
+            openrouter_models: Vec::new(),
+            model_selected: 0,
             dir_input_rect: Rect::default(),
         }
     }
@@ -216,6 +220,9 @@ pub async fn run(
         Option<mpsc::Sender<LlmRequest>>,
         Option<mpsc::Receiver<LlmResponse>>,
     ) = (None, None);
+
+    // Channel for OpenRouter model list fetch
+    let (models_tx, mut models_rx) = mpsc::channel::<Vec<String>>(1);
 
     loop {
         let term_width = terminal.size()?.width;
@@ -252,6 +259,18 @@ pub async fn run(
                 state.in_flight = false;
                 handle_llm_response(&mut state, response);
             }
+        }
+
+        // Check for OpenRouter model list
+        if let Ok(mut models) = models_rx.try_recv() {
+            models.sort();
+            // Find current model in list for initial selection
+            let current = state.model_input.lines().join("");
+            state.model_selected = models
+                .iter()
+                .position(|m| m == &current)
+                .unwrap_or(0);
+            state.openrouter_models = models;
         }
 
         // Check debounce
@@ -333,6 +352,17 @@ pub async fn run(
                     // Handle screen transitions
                     if prev_screen != state.screen {
                         match (&prev_screen, &state.screen) {
+                            (_, Screen::Settings) => {
+                                // Fetch OpenRouter models if not already loaded
+                                if state.openrouter_models.is_empty() {
+                                    let tx = models_tx.clone();
+                                    tokio::spawn(async move {
+                                        let _ = tx
+                                            .send(fetch_openrouter_models().await)
+                                            .await;
+                                    });
+                                }
+                            }
                             (_, Screen::Editor) => {
                                 // Entering editor — spawn LLM if configured
                                 if let Some(ref cfg) = state.llm_config {
@@ -671,6 +701,30 @@ fn handle_settings_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
         }
         Action::ForwardToEditor(key_event) => {
             let idx = state.settings_field as usize;
+            // Model field: Up/Down cycle through loaded OpenRouter models
+            if idx == 3 && !state.openrouter_models.is_empty() {
+                if matches!(key_event.code, KeyCode::Up) {
+                    if state.model_selected > 0 {
+                        state.model_selected -= 1;
+                    } else {
+                        state.model_selected = state.openrouter_models.len() - 1;
+                    }
+                    let model = state.openrouter_models[state.model_selected].clone();
+                    state.model_input.select_all();
+                    state.model_input.cut();
+                    state.model_input.insert_str(&model);
+                    return Ok(());
+                }
+                if matches!(key_event.code, KeyCode::Down) {
+                    state.model_selected =
+                        (state.model_selected + 1) % state.openrouter_models.len();
+                    let model = state.openrouter_models[state.model_selected].clone();
+                    state.model_input.select_all();
+                    state.model_input.cut();
+                    state.model_input.insert_str(&model);
+                    return Ok(());
+                }
+            }
             if idx < 3 {
                 state.settings_inputs[idx].input(key_event);
             } else {
@@ -926,6 +980,31 @@ fn sanitize_filename(name: &str) -> String {
         .collect::<String>()
         .trim()
         .to_string()
+}
+
+// --- OpenRouter models ---
+
+async fn fetch_openrouter_models() -> Vec<String> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .get("https://openrouter.ai/api/v1/models")
+        .send()
+        .await;
+
+    match resp {
+        Ok(r) => {
+            if let Ok(json) = r.json::<serde_json::Value>().await {
+                if let Some(data) = json["data"].as_array() {
+                    return data
+                        .iter()
+                        .filter_map(|m| m["id"].as_str().map(String::from))
+                        .collect();
+                }
+            }
+            vec![]
+        }
+        Err(_) => vec![],
+    }
 }
 
 // --- Helpers ---

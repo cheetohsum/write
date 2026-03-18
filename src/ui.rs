@@ -376,10 +376,18 @@ fn render_settings(f: &mut Frame, state: &mut AppState, area: Rect) {
     }
 
     // Model field
-    f.render_widget(
-        Paragraph::new(Span::styled("  Model (optional)", theme::label())),
-        form_chunks[12],
-    );
+    let model_label = if !state.openrouter_models.is_empty() {
+        Line::from(vec![
+            Span::styled("  Model", theme::label()),
+            Span::styled(
+                format!("  ↑↓ {} available", state.openrouter_models.len()),
+                theme::hint(),
+            ),
+        ])
+    } else {
+        Line::from(Span::styled("  Model (optional)", theme::label()))
+    };
+    f.render_widget(Paragraph::new(model_label), form_chunks[12]);
 
     {
         let is_active = state.settings_field == 3;

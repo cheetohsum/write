@@ -17,7 +17,8 @@ mod windows_setup {
     use windows_sys::Win32::System::Console::{
         AllocConsole, GetConsoleWindow, SetConsoleTitleW,
         SetConsoleScreenBufferSize, SetConsoleWindowInfo,
-        GetStdHandle, STD_OUTPUT_HANDLE,
+        GetStdHandle, GetConsoleMode, SetConsoleMode,
+        STD_OUTPUT_HANDLE, STD_INPUT_HANDLE,
         COORD, SMALL_RECT,
         CONSOLE_FONT_INFOEX, SetCurrentConsoleFontEx,
     };
@@ -58,6 +59,7 @@ mod windows_setup {
         set_title();
         set_icon();
         theme_title_bar();
+        disable_quick_edit();
         configure_console_font();
         set_window_size(120, 35);
         center_window();
@@ -160,6 +162,31 @@ mod windows_setup {
                 &text_color as *const u32 as *const _,
                 std::mem::size_of::<u32>() as u32,
             );
+        }
+    }
+
+    /// Disable quick-edit mode on the console input handle.
+    /// Quick-edit intercepts mouse clicks (for text selection) and Ctrl+A (select all)
+    /// at the console level, preventing crossterm from receiving them.
+    fn disable_quick_edit() {
+        let handle = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
+        if is_invalid_handle(handle) {
+            return;
+        }
+
+        let mut mode: u32 = 0;
+        unsafe {
+            GetConsoleMode(handle, &mut mode);
+        }
+
+        const ENABLE_QUICK_EDIT_MODE: u32 = 0x0040;
+        const ENABLE_EXTENDED_FLAGS: u32 = 0x0080;
+
+        mode &= !ENABLE_QUICK_EDIT_MODE;
+        mode |= ENABLE_EXTENDED_FLAGS;
+
+        unsafe {
+            SetConsoleMode(handle, mode);
         }
     }
 
