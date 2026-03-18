@@ -25,6 +25,7 @@ const DEBOUNCE_SENTENCE_MS: u64 = 300;
 const DEBOUNCE_NEWLINE_MS: u64 = 300;
 const DEBOUNCE_MICRO_MS: u64 = 500;
 const DEBOUNCE_RATE_LIMITED_MS: u64 = 8000;
+const DEBOUNCE_POST_APPLY_MS: u64 = 5000;
 const STARTUP_ANIM_MS: u64 = 900;
 const TRANSITION_MS: u64 = 350;
 
@@ -982,21 +983,21 @@ fn handle_llm_response(state: &mut AppState, response: LlmResponse) {
         state.editor.last_sent_hash = llm::content_hash(new_text);
         state.llm_status = LlmStatus::Applied;
         state.llm_status_flash = Some(Instant::now());
-        state.debounce_duration = Duration::from_millis(DEBOUNCE_IDLE_MS);
+        state.debounce_duration = Duration::from_millis(DEBOUNCE_POST_APPLY_MS);
         return;
     }
 
     // Apply cleaned text and start visual dissolve on changed positions.
-    // Do NOT call wrap_all_lines() — it shifts line boundaries and disrupts
-    // the cursor position. The LLM response preserves the user's line breaks,
-    // and any long lines get wrapped naturally when the user types on them.
     state.editor.replace_content(new_text);
     // Hash the ACTUAL editor content (after replacement), not the LLM response,
     // to prevent a regeneration loop when content differs due to padding/trailing lines.
     state.editor.last_sent_hash = state.editor.content_hash();
     state.llm_status = LlmStatus::Applied;
     state.llm_status_flash = Some(Instant::now());
-    state.debounce_duration = Duration::from_millis(DEBOUNCE_IDLE_MS);
+    // Use a longer cooldown after applying — prevents the "cleaning" loop where
+    // the LLM keeps making slightly different formatting changes each cycle.
+    state.debounce_duration = Duration::from_millis(DEBOUNCE_POST_APPLY_MS);
+    state.words_since_send = 0;
 
     // Start per-character dissolve animation (render-buffer only)
     if !changed.is_empty() {

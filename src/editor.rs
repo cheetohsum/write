@@ -87,8 +87,10 @@ impl<'a> EditorState<'a> {
     }
 
     /// Replace content only if it actually changed.
-    /// Tracks cursor as an offset from the END of the document so that
-    /// LLM changes before the cursor don't shift its position.
+    /// Uses two strategies to preserve cursor position:
+    /// - On a blank/trailing line: keep the exact (row, col) with padding
+    /// - On a content line: track offset from END of document so LLM edits
+    ///   before the cursor don't shift it
     pub fn replace_content(&mut self, new_text: &str) {
         if self.content() == new_text {
             return;
@@ -96,32 +98,45 @@ impl<'a> EditorState<'a> {
         let old_content = self.content();
         let (row, col) = self.textarea.cursor();
 
-        // Compute cursor position as characters from the END of the document.
-        // This is immune to the LLM adding/removing chars before the cursor.
-        let chars_before: usize = old_content
-            .split('\n')
-            .take(row)
-            .map(|l| l.len() + 1)
-            .sum::<usize>()
-            + col;
-        let offset_from_end = old_content.len().saturating_sub(chars_before);
+        // If cursor is on an empty line (blank line or trailing newline),
+        // preserve the exact row — the offset-from-end approach would
+        // incorrectly map to the end of the last content line.
+        let on_empty_line = self
+            .textarea
+            .lines()
+            .get(row)
+            .map(|l| l.is_empty())
+            .unwrap_or(true);
 
-        // Map the end-offset back to (row, col) in the new text
-        let new_cursor_pos = new_text.len().saturating_sub(offset_from_end);
-        let mut new_row = 0;
-        let mut new_col = 0;
-        let mut pos = 0;
-        for (i, line) in new_text.split('\n').enumerate() {
-            if pos + line.len() >= new_cursor_pos {
-                new_row = i;
-                new_col = new_cursor_pos.saturating_sub(pos);
-                break;
+        if on_empty_line {
+            self.set_content_with_cursor(new_text, row, col);
+        } else {
+            // Compute cursor as offset from END of document — immune to
+            // the LLM adding/removing chars before the cursor.
+            let chars_before: usize = old_content
+                .split('\n')
+                .take(row)
+                .map(|l| l.len() + 1)
+                .sum::<usize>()
+                + col;
+            let offset_from_end = old_content.len().saturating_sub(chars_before);
+
+            let new_cursor_pos = new_text.len().saturating_sub(offset_from_end);
+            let mut new_row = 0;
+            let mut new_col = 0;
+            let mut pos = 0;
+            for (i, line) in new_text.split('\n').enumerate() {
+                if pos + line.len() >= new_cursor_pos {
+                    new_row = i;
+                    new_col = new_cursor_pos.saturating_sub(pos);
+                    break;
+                }
+                pos += line.len() + 1;
+                new_row = i + 1;
             }
-            pos += line.len() + 1;
-            new_row = i + 1;
-        }
 
-        self.set_content_with_cursor(new_text, new_row, new_col);
+            self.set_content_with_cursor(new_text, new_row, new_col);
+        }
     }
 
     pub fn set_content_with_cursor(&mut self, content: &str, row: usize, col: usize) {
