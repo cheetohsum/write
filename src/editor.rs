@@ -87,12 +87,12 @@ impl<'a> EditorState<'a> {
     }
 
     /// Wrap all lines that exceed wrap_width. Called after LLM replacements.
+    /// Preserves the exact cursor position so the user isn't interrupted.
     pub fn wrap_all_lines(&mut self) {
         let max = self.wrap_width as usize;
         if max == 0 {
             return;
         }
-        // Collect the full text, wrap it in pure string form, then replace
         let content = self.content();
         let mut wrapped = String::new();
         for line in content.lines() {
@@ -100,7 +100,7 @@ impl<'a> EditorState<'a> {
             while remaining.len() > max {
                 let break_at = match remaining[..max].rfind(' ') {
                     Some(pos) => pos,
-                    None => break, // single long word, leave it
+                    None => break,
                 };
                 wrapped.push_str(&remaining[..break_at]);
                 wrapped.push('\n');
@@ -109,15 +109,12 @@ impl<'a> EditorState<'a> {
             wrapped.push_str(remaining);
             wrapped.push('\n');
         }
-        // Remove trailing newline added by the loop
         if wrapped.ends_with('\n') {
             wrapped.pop();
         }
         if wrapped != content {
-            let (row, _) = self.textarea.cursor();
-            self.set_content_with_cursor(&wrapped, row, 0);
-            // After wrapping, go to end of the line
-            self.textarea.move_cursor(CursorMove::End);
+            let (row, col) = self.textarea.cursor();
+            self.set_content_with_cursor(&wrapped, row, col);
         }
     }
 

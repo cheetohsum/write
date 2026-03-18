@@ -620,6 +620,45 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Markdown rich text styling
     style_markdown(f.buffer_mut(), editor_outer[1]);
 
+    // --- Scroll position indicator (left margin) ---
+    {
+        let total_lines = state.editor.textarea.lines().len();
+        let viewport_h = editor_outer[1].height as usize;
+
+        if total_lines > viewport_h {
+            let (cursor_row, _) = state.editor.textarea.cursor();
+            let track_x = editor_outer[0].right() - 2; // second-to-last col of left padding
+            let track_top = editor_outer[1].top();
+            let track_bottom = editor_outer[1].bottom();
+            let track_height = (track_bottom - track_top) as usize;
+
+            // Subtle track line
+            for y in track_top..track_bottom {
+                let cell = &mut f.buffer_mut()[(track_x, y)];
+                cell.set_char('·');
+                cell.set_fg(theme::SANDSTONE);
+            }
+
+            // Thumb — proportional to viewport/total, positioned by cursor
+            let thumb_h = ((viewport_h as f64 / total_lines as f64) * track_height as f64)
+                .ceil() as u16;
+            let thumb_h = thumb_h.max(1).min(track_height as u16);
+
+            let cursor_frac =
+                cursor_row as f64 / (total_lines.saturating_sub(1)).max(1) as f64;
+            let thumb_y = track_top
+                + (cursor_frac * (track_height as u16 - thumb_h) as f64) as u16;
+
+            for y in thumb_y..thumb_y + thumb_h {
+                if y < track_bottom {
+                    let cell = &mut f.buffer_mut()[(track_x, y)];
+                    cell.set_char('▐');
+                    cell.set_fg(theme::GOLD);
+                }
+            }
+        }
+    }
+
     // Per-character dissolve on LLM-changed positions
     if let Some(ref dissolve) = state.text_dissolve {
         let elapsed = dissolve.start.elapsed().as_millis() as u64;
