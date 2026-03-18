@@ -220,7 +220,7 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
     let breadcrumb = state.breadcrumb();
     let title_line = Line::from(vec![
         Span::styled(
-            "◆ ",
+            "✧ ",
             Style::default()
                 .fg(theme::GOLD)
                 .bg(theme::UMBER),
@@ -292,18 +292,19 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Markdown rich text styling
     style_markdown(f.buffer_mut(), editor_outer[2]);
 
-    // --- Info bar (word count + LLM status) ---
+    // --- Info bar (icons + counts + LLM status) ---
+    // ✦ = word count icon, ⟡ = LLM status icon
     let llm_status_text = match state.llm_status {
-        LlmStatus::Disabled => "LLM off",
-        LlmStatus::Idle => "LLM idle",
-        LlmStatus::Waiting => "LLM waiting",
-        LlmStatus::Cleaning => "LLM cleaning...",
-        LlmStatus::Applied => "LLM applied",
-        LlmStatus::Error => "LLM error",
-        LlmStatus::Off => "LLM paused",
+        LlmStatus::Disabled => "off",
+        LlmStatus::Idle => "idle",
+        LlmStatus::Waiting => "waiting",
+        LlmStatus::Cleaning => "cleaning...",
+        LlmStatus::Applied => "applied",
+        LlmStatus::Error => "error",
+        LlmStatus::Off => "paused",
     };
 
-    let llm_dot_color = match state.llm_status {
+    let llm_icon_color = match state.llm_status {
         LlmStatus::Applied => theme::SAGE,
         LlmStatus::Cleaning => theme::GOLD,
         LlmStatus::Error => theme::MAROON,
@@ -311,22 +312,33 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
         _ => theme::SANDSTONE,
     };
 
-    let save_text = if state.just_saved { " saved " } else { "" };
-
-    let info_line = Line::from(vec![
+    let save_span = if state.just_saved {
         Span::styled(
-            save_text,
+            " ✓ saved ",
             Style::default()
                 .fg(theme::SAGE)
                 .bg(theme::UMBER)
                 .add_modifier(Modifier::BOLD),
+        )
+    } else {
+        Span::styled("", theme::status_bar())
+    };
+
+    let info_line = Line::from(vec![
+        save_span,
+        Span::styled(
+            "  ✦ ",
+            Style::default().fg(theme::GOLD).bg(theme::UMBER),
         ),
         Span::styled(
-            format!("  {} words ", state.editor.word_count()),
+            format!("{} ", state.editor.word_count()),
             theme::status_bar(),
         ),
-        Span::styled("│ ", Style::default().fg(theme::CLAY).bg(theme::UMBER)),
-        Span::styled("● ", Style::default().fg(llm_dot_color).bg(theme::UMBER)),
+        Span::styled("  ", theme::status_bar()),
+        Span::styled(
+            "⟡ ",
+            Style::default().fg(llm_icon_color).bg(theme::UMBER),
+        ),
         Span::styled(llm_status_text, theme::status_bar()),
     ]);
     f.render_widget(
@@ -336,15 +348,14 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
         chunks[3],
     );
 
-    // --- Command bar (keybinding descriptions) ---
-    let cmd_style = Style::default().fg(theme::CLAY).bg(theme::UMBER);
+    // --- Command bar (keybinding descriptions) — higher contrast ---
+    let cmd_style = Style::default().fg(theme::SANDSTONE).bg(theme::UMBER);
     let key_style = Style::default()
         .fg(theme::CREAM)
         .bg(theme::UMBER)
         .add_modifier(Modifier::BOLD);
 
     let mut cmd_spans = vec![
-        Span::styled("✎ ", Style::default().fg(theme::GOLD).bg(theme::UMBER)),
         Span::styled("^S", key_style),
         Span::styled(" save  ", cmd_style),
         Span::styled("^G", key_style),
@@ -352,7 +363,7 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
         Span::styled("^O", key_style),
         Span::styled(" open  ", cmd_style),
         Span::styled("^A", key_style),
-        Span::styled(" select all  ", cmd_style),
+        Span::styled(" all  ", cmd_style),
         Span::styled("^L", key_style),
         Span::styled(" llm  ", cmd_style),
     ];

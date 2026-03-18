@@ -109,19 +109,34 @@ impl<'a> EditorState<'a> {
             wrapped.pop();
         }
         if wrapped != content {
-            let (row, col) = self.textarea.cursor();
-            self.set_content_with_cursor(&wrapped, row, col);
+            let (row, _) = self.textarea.cursor();
+            self.set_content_with_cursor(&wrapped, row, 0);
+            // After wrapping, go to end of the line
+            self.textarea.move_cursor(CursorMove::End);
         }
     }
 
-    /// Replace content only if it actually changed. Preserves cursor position.
+    /// Replace content only if it actually changed.
+    /// Cursor stays at the end of the line it was on (writing position).
     pub fn replace_content(&mut self, new_text: &str) {
-        // Skip if content is identical — avoids cursor flicker
         if self.content() == new_text {
             return;
         }
-        let (row, col) = self.textarea.cursor();
-        self.set_content_with_cursor(new_text, row, col);
+        let (row, _col) = self.textarea.cursor();
+
+        self.textarea.select_all();
+        self.textarea.cut();
+        self.textarea.insert_str(new_text);
+
+        // Restore to same row, but at end of line (user is typing there)
+        let line_count = self.textarea.lines().len();
+        let target_row = row.min(line_count.saturating_sub(1));
+        self.textarea.move_cursor(CursorMove::Top);
+        self.textarea.move_cursor(CursorMove::Head);
+        for _ in 0..target_row {
+            self.textarea.move_cursor(CursorMove::Down);
+        }
+        self.textarea.move_cursor(CursorMove::End);
     }
 
     pub fn set_content_with_cursor(&mut self, content: &str, row: usize, col: usize) {
