@@ -952,7 +952,9 @@ fn handle_llm_response(state: &mut AppState, response: LlmResponse) {
 
     let original_len = state.editor.content().len();
     let cleaned_len = response.cleaned_text.len();
-    if cleaned_len > original_len * 2 || (original_len > 10 && cleaned_len < original_len / 3) {
+    // Allow up to 3x for screenplay formatting (bold markers + blank lines add length)
+    // and down to 1/3 for cleanup that removes redundant whitespace
+    if cleaned_len > original_len * 3 || (original_len > 20 && cleaned_len < original_len / 3) {
         state.llm_status = LlmStatus::Error;
         return;
     }
