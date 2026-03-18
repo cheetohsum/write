@@ -84,6 +84,7 @@ pub struct AppState<'a> {
     pub title_input: TextArea<'a>,
     pub startup_field: u8,
     pub llm_status: LlmStatus,
+    pub llm_status_flash: Option<Instant>,
     pub llm_enabled: bool,
     pub just_saved: bool,
     pub save_flash_until: Option<Instant>,
@@ -133,6 +134,7 @@ impl<'a> AppState<'a> {
             title_input,
             startup_field: 1,
             llm_status,
+            llm_status_flash: None,
             llm_enabled,
             just_saved: false,
             save_flash_until: None,
@@ -243,6 +245,7 @@ pub async fn run(
                         state.in_flight = true;
                         state.words_since_send = 0;
                         state.llm_status = LlmStatus::Cleaning;
+                        state.llm_status_flash = Some(Instant::now());
                         let _ = tx.try_send(LlmRequest {
                             text,
                             hash: current_hash,
@@ -252,8 +255,10 @@ pub async fn run(
             }
         }
 
+        let status_flashing = state.llm_status_flash.map_or(false, |t| t.elapsed().as_millis() < 1500);
         let animating = state.startup_anim.is_some()
-            || state.transition.is_some();
+            || state.transition.is_some()
+            || status_flashing;
         let poll_duration = if animating {
             Duration::from_millis(30)
         } else {
@@ -619,15 +624,17 @@ fn handle_llm_response(state: &mut AppState, response: LlmResponse) {
     if changed.is_empty() {
         state.editor.last_sent_hash = llm::content_hash(new_text);
         state.llm_status = LlmStatus::Applied;
+        state.llm_status_flash = Some(Instant::now());
         state.debounce_duration = Duration::from_millis(DEBOUNCE_IDLE_MS);
         return;
     }
 
-    // Apply cleaned text directly — no animation to avoid cursor disruption
+    // Apply cleaned text directly
     state.editor.replace_content(new_text);
     state.editor.wrap_all_lines();
     state.editor.last_sent_hash = llm::content_hash(new_text);
     state.llm_status = LlmStatus::Applied;
+    state.llm_status_flash = Some(Instant::now());
     state.debounce_duration = Duration::from_millis(DEBOUNCE_IDLE_MS);
 }
 

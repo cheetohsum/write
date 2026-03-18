@@ -225,10 +225,10 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
     // --- Dark bottom edge ---
     f.render_widget(Block::default().style(edge), chunks[8]);
 
-    // --- Padding rows (parchment) ---
-    f.render_widget(Block::default().style(theme::status_bar()), chunks[1]);
-    f.render_widget(Block::default().style(theme::base()), chunks[3]);
-    f.render_widget(Block::default().style(theme::base()), chunks[5]);
+    // --- Padding rows ---
+    f.render_widget(Block::default().style(theme::title_bar()), chunks[1]); // above title
+    f.render_widget(Block::default().style(theme::base()), chunks[3]);      // below title
+    f.render_widget(Block::default().style(theme::base()), chunks[5]);      // above info bar
 
     // --- Centered title bar with icon ---
     let breadcrumb = state.breadcrumb();
@@ -303,14 +303,13 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Markdown rich text styling
     style_markdown(f.buffer_mut(), editor_outer[2]);
 
-    // --- Info bar (icons + counts + LLM status) ---
-    // ✦ = word count icon, ⟡ = LLM status icon
+    // --- Info bar: word count + LLM status with flash dissolve ---
     let llm_status_text = match state.llm_status {
         LlmStatus::Disabled => "off",
-        LlmStatus::Idle => "idle",
+        LlmStatus::Idle => "",
         LlmStatus::Waiting => "waiting",
         LlmStatus::Cleaning => "cleaning...",
-        LlmStatus::Applied => "applied",
+        LlmStatus::Applied => "applied ✓",
         LlmStatus::Error => "error",
         LlmStatus::Off => "paused",
     };
@@ -321,6 +320,13 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
         LlmStatus::Error => theme::MAROON,
         LlmStatus::Disabled | LlmStatus::Off => theme::CLAY,
         _ => theme::SANDSTONE,
+    };
+
+    // Flash: show status for 1.5s then fade to just the icon
+    let show_status_text = if let Some(flash_start) = state.llm_status_flash {
+        flash_start.elapsed().as_millis() < 1500
+    } else {
+        false
     };
 
     let save_span = if state.just_saved {
@@ -335,31 +341,34 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
         Span::styled("", theme::status_bar())
     };
 
-    let info_line = Line::from(vec![
+    let mut info_spans = vec![
         save_span,
         Span::styled(
             "  ✦ ",
             Style::default().fg(theme::GOLD).bg(theme::UMBER),
         ),
         Span::styled(
-            format!("{} ", state.editor.word_count()),
+            format!("{}", state.editor.word_count()),
             theme::status_bar(),
         ),
-        Span::styled("  ", theme::status_bar()),
+        Span::styled("   ", theme::status_bar()),
         Span::styled(
             "⟡ ",
             Style::default().fg(llm_icon_color).bg(theme::UMBER),
         ),
-        Span::styled(llm_status_text, theme::status_bar()),
-    ]);
+    ];
+    if show_status_text && !llm_status_text.is_empty() {
+        info_spans.push(Span::styled(llm_status_text, theme::status_bar()));
+    }
+
     f.render_widget(
-        Paragraph::new(info_line)
+        Paragraph::new(Line::from(info_spans))
             .style(theme::status_bar())
             .alignment(Alignment::Center),
-        chunks[3],
+        chunks[6],
     );
 
-    // --- Command bar (keybinding descriptions) — higher contrast ---
+    // --- Command bar ---
     let cmd_style = Style::default().fg(theme::SANDSTONE).bg(theme::UMBER);
     let key_style = Style::default()
         .fg(theme::CREAM)
@@ -390,8 +399,29 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
         Paragraph::new(Line::from(cmd_spans))
             .style(theme::status_bar())
             .alignment(Alignment::Center),
-        chunks[4],
+        chunks[7],
     );
+
+    // Apply dither dissolve to status text when flash is fading out
+    if let Some(flash_start) = state.llm_status_flash {
+        let elapsed = flash_start.elapsed().as_millis() as u64;
+        if elapsed >= 1000 && elapsed < 1500 {
+            // Dissolve the status text area over 500ms
+            let fade_progress = (elapsed - 1000) as f64 / 500.0;
+            let info_area = chunks[6];
+            for x in info_area.left()..info_area.right() {
+                let cell_hash = hash_position(x, info_area.top());
+                let threshold = (cell_hash >> 33) as f64 / (u32::MAX as f64);
+                if fade_progress > threshold {
+                    let cell = &mut f.buffer_mut()[(x, info_area.top())];
+                    let sym = cell.symbol().chars().next().unwrap_or(' ');
+                    if sym.is_alphabetic() || sym == '.' || sym == '✓' {
+                        cell.set_char(' ');
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn render_quit_modal(f: &mut Frame, area: Rect) {
