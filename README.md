@@ -74,9 +74,35 @@ The app auto-detects which provider to use based on available keys. Priority: `A
 |-----|--------|
 | `Ctrl+S` | Save document |
 | `Ctrl+Q` / `Esc` | Quit (confirms if unsaved) |
+| `Ctrl+G` | Wrap word under cursor in `[[wiki-link]]` |
+| `Ctrl+O` | Open/navigate into `[[link]]` under cursor |
+| `Esc` | Go back to parent page (when inside a linked page) |
 | `Ctrl+L` | Toggle LLM on/off |
 | `Tab` | Switch fields (startup screen) |
 | `Enter` | Begin writing (startup screen) |
+
+## Graph-Node Links
+
+Write supports `[[wiki-links]]` for building a graph of interconnected documents — characters, locations, concepts, or anything you want to describe in its own page.
+
+**Creating a link:** Place your cursor on any proper noun and press `Ctrl+G`. The word wraps in `[[brackets]]` and renders as **bold maroon** text in the editor.
+
+**Navigating into a link:** Move the cursor onto a `[[link]]` and press `Ctrl+O`. The screen zooms in with a radial dither animation, and you enter the linked page to write its content. The title bar shows a breadcrumb trail: `my-essay.md > Character Name`.
+
+**Going back:** Press `Esc` to save the linked page and zoom back out to the parent document. Your cursor returns to where you left off.
+
+**File structure:** linked pages are stored alongside your document:
+
+```
+~/Documents/
+├── my-essay.md              ← main document with [[links]]
+└── my-essay/
+    ├── Character Name.md    ← linked page
+    ├── Location.md
+    └── ...
+```
+
+This structure is compatible with Obsidian, Logseq, and other wiki-link tools.
 
 ## Screenplay Support
 

@@ -5,10 +5,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::app::{AppState, LlmStatus, Screen};
+use crate::app::{AppState, LlmStatus, RevealStyle, Screen};
 use crate::theme;
 
-// Dither noise characters — blocks + dots for a textured dissolve
 const DITHER_CHARS: &[char] = &['░', '▒', '▓', '·', ':', '∷', '─', '┄'];
 const DITHER_COLORS: &[Color] = &[
     theme::SANDSTONE,
@@ -32,30 +31,30 @@ pub fn render(f: &mut Frame, state: &mut AppState) {
         }
     }
 
-    // Overlay: startup reveal animation (noise → content)
+    // Startup reveal animation
     if state.screen == Screen::Startup {
         if let Some(ref anim) = state.startup_anim {
             let elapsed = anim.start.elapsed().as_millis() as u64;
             if elapsed < 900 {
-                apply_reveal_overlay(f.buffer_mut(), area, elapsed, 900, true);
+                apply_reveal_overlay(f.buffer_mut(), area, elapsed, 900, &RevealStyle::TopDown);
             }
         }
     }
 
-    // Overlay: screen transition (content → noise → content)
+    // Screen transition overlay
     if let Some(ref trans) = state.transition {
         let elapsed = trans.start.elapsed().as_millis() as u64;
         if elapsed < 350 {
-            apply_reveal_overlay(f.buffer_mut(), area, elapsed, 350, false);
+            apply_reveal_overlay(f.buffer_mut(), area, elapsed, 350, &trans.style);
         }
     }
 }
 
 fn render_startup(f: &mut Frame, state: &mut AppState, area: Rect) {
     let chunks = Layout::vertical([
-        Constraint::Min(1),      // top padding
-        Constraint::Length(20),  // form area
-        Constraint::Min(1),      // bottom padding
+        Constraint::Min(1),
+        Constraint::Length(20),
+        Constraint::Min(1),
     ])
     .split(area);
 
@@ -80,44 +79,46 @@ fn render_startup(f: &mut Frame, state: &mut AppState, area: Rect) {
     ])
     .split(form_area);
 
-    // Decorative top line ═══
     let deco_width = form_area.width as usize;
     let top_line = "━".repeat(deco_width);
-    let deco_top = Paragraph::new(Span::styled(&top_line, theme::decorative_line()));
-    f.render_widget(deco_top, form_chunks[0]);
+    f.render_widget(
+        Paragraph::new(Span::styled(&top_line, theme::decorative_line())),
+        form_chunks[0],
+    );
 
-    // App title
-    let title = Paragraph::new(Line::from(vec![
-        Span::styled(
+    f.render_widget(
+        Paragraph::new(Line::from(vec![Span::styled(
             "write",
             Style::default()
                 .fg(theme::MAROON)
                 .bg(theme::PARCHMENT)
                 .add_modifier(Modifier::BOLD),
-        ),
-    ]))
-    .alignment(Alignment::Center);
-    f.render_widget(title, form_chunks[2]);
+        )]))
+        .alignment(Alignment::Center),
+        form_chunks[2],
+    );
 
-    // Subtitle
-    let subtitle = Paragraph::new(Line::from(vec![
-        Span::styled("── ", theme::decorative_line_subtle()),
-        Span::styled("a writing tool", theme::secondary()),
-        Span::styled(" ──", theme::decorative_line_subtle()),
-    ]))
-    .alignment(Alignment::Center);
-    f.render_widget(subtitle, form_chunks[3]);
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("── ", theme::decorative_line_subtle()),
+            Span::styled("a writing tool", theme::secondary()),
+            Span::styled(" ──", theme::decorative_line_subtle()),
+        ]))
+        .alignment(Alignment::Center),
+        form_chunks[3],
+    );
 
-    // Decorative mid line
     let mid_line = "─".repeat(deco_width);
-    let deco_mid = Paragraph::new(Span::styled(&mid_line, theme::decorative_line_subtle()));
-    f.render_widget(deco_mid, form_chunks[5]);
+    f.render_widget(
+        Paragraph::new(Span::styled(&mid_line, theme::decorative_line_subtle())),
+        form_chunks[5],
+    );
 
-    // Directory label
-    let dir_label = Paragraph::new(Span::styled("  Output Directory", theme::label()));
-    f.render_widget(dir_label, form_chunks[7]);
+    f.render_widget(
+        Paragraph::new(Span::styled("  Output Directory", theme::label())),
+        form_chunks[7],
+    );
 
-    // Directory input
     let dir_border_style = if state.startup_field == 0 {
         theme::border_active()
     } else {
@@ -142,11 +143,11 @@ fn render_startup(f: &mut Frame, state: &mut AppState, area: Rect) {
     }
     f.render_widget(&state.dir_input, form_chunks[8]);
 
-    // Title label
-    let title_label = Paragraph::new(Span::styled("  Document Title", theme::label()));
-    f.render_widget(title_label, form_chunks[9]);
+    f.render_widget(
+        Paragraph::new(Span::styled("  Document Title", theme::label())),
+        form_chunks[9],
+    );
 
-    // Title input
     let title_border_style = if state.startup_field == 1 {
         theme::border_active()
     } else {
@@ -171,30 +172,32 @@ fn render_startup(f: &mut Frame, state: &mut AppState, area: Rect) {
     }
     f.render_widget(&state.title_input, form_chunks[10]);
 
-    // Decorative bottom line
-    let deco_bot = Paragraph::new(Span::styled(&mid_line, theme::decorative_line_subtle()));
-    f.render_widget(deco_bot, form_chunks[12]);
+    f.render_widget(
+        Paragraph::new(Span::styled(&mid_line, theme::decorative_line_subtle())),
+        form_chunks[12],
+    );
 
-    // Provider info + keybindings on same line
     let provider_text = match &state.llm_config {
         Some(cfg) => cfg.display(),
         None => "no API key".to_string(),
     };
 
-    let bottom_line = Line::from(vec![
-        Span::styled("  ", theme::base()),
-        Span::styled(&provider_text, theme::hint()),
-        Span::styled("    ", theme::base()),
-        Span::styled("tab", Style::default().fg(theme::MAROON).bg(theme::PARCHMENT)),
-        Span::styled(" · ", theme::hint()),
-        Span::styled(
-            "enter",
-            Style::default().fg(theme::MAROON).bg(theme::PARCHMENT),
-        ),
-        Span::styled(" · ", theme::hint()),
-        Span::styled("esc", Style::default().fg(theme::MAROON).bg(theme::PARCHMENT)),
-    ]);
-    f.render_widget(Paragraph::new(bottom_line), form_chunks[14]);
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("  ", theme::base()),
+            Span::styled(&provider_text, theme::hint()),
+            Span::styled("    ", theme::base()),
+            Span::styled("tab", Style::default().fg(theme::MAROON).bg(theme::PARCHMENT)),
+            Span::styled(" · ", theme::hint()),
+            Span::styled(
+                "enter",
+                Style::default().fg(theme::MAROON).bg(theme::PARCHMENT),
+            ),
+            Span::styled(" · ", theme::hint()),
+            Span::styled("esc", Style::default().fg(theme::MAROON).bg(theme::PARCHMENT)),
+        ])),
+        form_chunks[14],
+    );
 }
 
 fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
@@ -205,7 +208,8 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
     ])
     .split(area);
 
-    // Title bar — umber background with maroon dot for modified
+    // Title bar with breadcrumb
+    let breadcrumb = state.breadcrumb();
     let modified_indicator = if state.editor.modified {
         Span::styled(
             "  ● ",
@@ -227,11 +231,13 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled("│ ", Style::default().fg(theme::CLAY).bg(theme::UMBER)),
-        Span::styled(format!("{}.md", state.doc_title), theme::title_bar()),
+        Span::styled(breadcrumb, theme::title_bar()),
         modified_indicator,
     ]);
-    let title_bar = Paragraph::new(title_line).style(theme::title_bar());
-    f.render_widget(title_bar, chunks[0]);
+    f.render_widget(
+        Paragraph::new(title_line).style(theme::title_bar()),
+        chunks[0],
+    );
 
     // Editor with horizontal padding
     let editor_padded = Layout::horizontal([
@@ -244,6 +250,9 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
     f.render_widget(pad_bg.clone(), editor_padded[0]);
     f.render_widget(pad_bg, editor_padded[2]);
     f.render_widget(&state.editor.textarea, editor_padded[1]);
+
+    // Style [[wiki-links]] in the rendered buffer
+    style_wiki_links(f.buffer_mut(), editor_padded[1]);
 
     // Status bar
     let llm_status_text = match state.llm_status {
@@ -276,6 +285,12 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
         Span::styled("  ", theme::status_bar())
     };
 
+    let hints = if state.is_nested() {
+        "^S save  ^G link  ^O open  Esc back  ^L llm "
+    } else {
+        "^S save  ^G link  ^O open  ^Q quit  ^L llm "
+    };
+
     let status_line = Line::from(vec![
         save_span,
         Span::styled(
@@ -283,19 +298,17 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
             theme::status_bar(),
         ),
         Span::styled("│ ", Style::default().fg(theme::CLAY).bg(theme::UMBER)),
-        Span::styled(
-            "● ",
-            Style::default().fg(llm_dot_color).bg(theme::UMBER),
-        ),
+        Span::styled("● ", Style::default().fg(llm_dot_color).bg(theme::UMBER)),
         Span::styled(llm_status_text, theme::status_bar()),
         Span::styled(
-            " │ ^S save  ^Q quit  ^L llm ",
+            format!(" │ {}", hints),
             Style::default().fg(theme::CLAY).bg(theme::UMBER),
         ),
     ]);
-
-    let status_bar = Paragraph::new(status_line).style(theme::status_bar());
-    f.render_widget(status_bar, chunks[2]);
+    f.render_widget(
+        Paragraph::new(status_line).style(theme::status_bar()),
+        chunks[2],
+    );
 }
 
 fn render_quit_modal(f: &mut Frame, area: Rect) {
@@ -324,33 +337,80 @@ fn render_quit_modal(f: &mut Frame, area: Rect) {
     ])
     .split(inner);
 
-    let msg = Paragraph::new("You have unsaved changes.")
-        .style(theme::modal_bg())
-        .alignment(Alignment::Center);
-    f.render_widget(msg, msg_chunks[0]);
+    f.render_widget(
+        Paragraph::new("You have unsaved changes.")
+            .style(theme::modal_bg())
+            .alignment(Alignment::Center),
+        msg_chunks[0],
+    );
 
-    let prompt = Paragraph::new(Line::from(vec![
-        Span::styled("quit anyway? ", theme::modal_bg()),
-        Span::styled(
-            "[y]",
-            Style::default()
-                .fg(theme::MAROON)
-                .bg(theme::WHEAT)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("es  ", theme::modal_bg()),
-        Span::styled(
-            "[n]",
-            Style::default()
-                .fg(theme::MAROON)
-                .bg(theme::WHEAT)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("o", theme::modal_bg()),
-    ]))
-    .alignment(Alignment::Center)
-    .wrap(Wrap { trim: false });
-    f.render_widget(prompt, msg_chunks[2]);
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("quit anyway? ", theme::modal_bg()),
+            Span::styled(
+                "[y]",
+                Style::default()
+                    .fg(theme::MAROON)
+                    .bg(theme::WHEAT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("es  ", theme::modal_bg()),
+            Span::styled(
+                "[n]",
+                Style::default()
+                    .fg(theme::MAROON)
+                    .bg(theme::WHEAT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("o", theme::modal_bg()),
+        ]))
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: false }),
+        msg_chunks[2],
+    );
+}
+
+// --- [[wiki-link]] styling ---
+
+fn style_wiki_links(buf: &mut Buffer, area: Rect) {
+    for y in area.top()..area.bottom() {
+        let mut x = area.left();
+        while x + 1 < area.right() {
+            let c1 = buf[(x, y)].symbol().chars().next().unwrap_or(' ');
+            let c2 = buf[(x + 1, y)].symbol().chars().next().unwrap_or(' ');
+
+            if c1 == '[' && c2 == '[' {
+                // Found [[, scan for ]]
+                let start_x = x;
+                let mut end_x = x + 2;
+                let mut found = false;
+                while end_x + 1 < area.right() {
+                    let e1 = buf[(end_x, y)].symbol().chars().next().unwrap_or(' ');
+                    let e2 = buf[(end_x + 1, y)].symbol().chars().next().unwrap_or(' ');
+                    if e1 == ']' && e2 == ']' {
+                        found = true;
+                        // Style brackets: subtle
+                        for bx in [start_x, start_x + 1, end_x, end_x + 1] {
+                            buf[(bx, y)].set_fg(theme::SANDSTONE);
+                        }
+                        // Style content: bold maroon
+                        for cx in (start_x + 2)..end_x {
+                            buf[(cx, y)].set_fg(theme::MAROON);
+                            buf[(cx, y)].modifier.insert(Modifier::BOLD);
+                        }
+                        x = end_x + 2;
+                        break;
+                    }
+                    end_x += 1;
+                }
+                if !found {
+                    x += 1;
+                }
+            } else {
+                x += 1;
+            }
+        }
+    }
 }
 
 // --- Dither / reveal overlay ---
@@ -360,32 +420,55 @@ fn apply_reveal_overlay(
     area: Rect,
     elapsed_ms: u64,
     total_ms: u64,
-    top_down: bool,
+    style: &RevealStyle,
 ) {
     let progress = elapsed_ms as f64 / total_ms as f64;
+    let cx = area.width as f64 / 2.0;
+    let cy = area.height as f64 / 2.0;
+    let max_dist = (cx * cx + cy * cy).sqrt();
 
     for y in area.top()..area.bottom() {
         for x in area.left()..area.right() {
-            let y_ratio = if area.height > 0 {
-                (y - area.top()) as f64 / area.height as f64
-            } else {
-                0.0
-            };
-
-            // Hash for this cell — deterministic per position
             let cell_hash = hash_position(x, y);
             let random_part = (cell_hash >> 33) as f64 / (u32::MAX as f64);
 
-            // Threshold: mix of directional sweep and randomness
-            let threshold = if top_down {
-                y_ratio * 0.55 + random_part * 0.45
-            } else {
-                // Scatter: fully random for transitions
-                random_part
+            let threshold = match style {
+                RevealStyle::TopDown => {
+                    let y_ratio = if area.height > 0 {
+                        (y - area.top()) as f64 / area.height as f64
+                    } else {
+                        0.0
+                    };
+                    y_ratio * 0.55 + random_part * 0.45
+                }
+                RevealStyle::Scatter => random_part,
+                RevealStyle::ZoomIn => {
+                    // Center resolves first, edges last
+                    let dx = (x - area.left()) as f64 - cx;
+                    let dy = (y - area.top()) as f64 - cy;
+                    let dist = (dx * dx + dy * dy).sqrt();
+                    let dist_ratio = if max_dist > 0.0 {
+                        dist / max_dist
+                    } else {
+                        0.0
+                    };
+                    dist_ratio * 0.6 + random_part * 0.4
+                }
+                RevealStyle::ZoomOut => {
+                    // Edges resolve first, center last
+                    let dx = (x - area.left()) as f64 - cx;
+                    let dy = (y - area.top()) as f64 - cy;
+                    let dist = (dx * dx + dy * dy).sqrt();
+                    let dist_ratio = if max_dist > 0.0 {
+                        1.0 - dist / max_dist
+                    } else {
+                        0.0
+                    };
+                    dist_ratio * 0.6 + random_part * 0.4
+                }
             };
 
             if progress < threshold {
-                // This cell is still noise — overwrite with dither
                 let ch = dither_char(cell_hash, elapsed_ms);
                 let fg = dither_color(cell_hash, elapsed_ms);
                 let cell = &mut buf[(x, y)];
@@ -414,8 +497,6 @@ fn dither_color(hash: u64, elapsed_ms: u64) -> Color {
     let idx = ((hash >> 16).wrapping_add(elapsed_ms / 80) as usize) % DITHER_COLORS.len();
     DITHER_COLORS[idx]
 }
-
-// --- Layout helpers ---
 
 fn centered_rect(percent_x: u16, area: Rect) -> Rect {
     let layout = Layout::horizontal([

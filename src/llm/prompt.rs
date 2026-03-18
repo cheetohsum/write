@@ -24,4 +24,9 @@ Screenplay and script formatting:
     - Shot descriptions (ANGLE ON, INSERT, SERIES OF SHOTS, MONTAGE): format in **bold** on their own line
     - (CONTINUED), (MORE), (CONT'D): preserve these markers in their standard positions
 11. When the text contains screenplay elements, apply screenplay formatting conventions consistently
-12. Do not convert non-screenplay prose into screenplay format — only format text that is clearly intended as a script";
+12. Do not convert non-screenplay prose into screenplay format — only format text that is clearly intended as a script
+
+Wiki-links:
+13. Preserve [[wiki-link]] syntax exactly — do not modify, remove, or reformat text inside [[ and ]] brackets
+14. Do not add [[brackets]] around text that the author did not already bracket
+15. Treat [[Name]] as a proper noun — do not correct the spelling or casing of text inside wiki-links";

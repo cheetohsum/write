@@ -44,6 +44,14 @@ pub enum LlmStatus {
     Off,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum RevealStyle {
+    TopDown,
+    Scatter,
+    ZoomIn,
+    ZoomOut,
+}
+
 pub struct AnimationState {
     pub new_text: String,
     pub changed_positions: Vec<(usize, usize)>,
@@ -57,6 +65,17 @@ pub struct StartupAnim {
 
 pub struct TransitionAnim {
     pub start: Instant,
+    pub style: RevealStyle,
+}
+
+/// Saved state for a page we navigated away from.
+pub struct PageEntry {
+    pub file_path: PathBuf,
+    pub display_name: String,
+    pub content: String,
+    pub cursor: (usize, usize),
+    pub modified: bool,
+    pub last_sent_hash: String,
 }
 
 pub struct AppState<'a> {
@@ -79,6 +98,10 @@ pub struct AppState<'a> {
     pub animation: Option<AnimationState>,
     pub startup_anim: Option<StartupAnim>,
     pub transition: Option<TransitionAnim>,
+    // Graph-node navigation
+    pub current_file: PathBuf,
+    pub current_page_name: String,
+    pub page_stack: Vec<PageEntry>,
 }
 
 impl<'a> AppState<'a> {
@@ -125,7 +148,31 @@ impl<'a> AppState<'a> {
                 start: Instant::now(),
             }),
             transition: None,
+            current_file: PathBuf::new(),
+            current_page_name: String::new(),
+            page_stack: Vec::new(),
         }
+    }
+
+    pub fn breadcrumb(&self) -> String {
+        if self.page_stack.is_empty() {
+            format!("{}.md", self.doc_title)
+        } else {
+            let mut parts: Vec<String> = self
+                .page_stack
+                .iter()
+                .map(|e| e.display_name.clone())
+                .collect();
+            parts.push(self.current_page_name.clone());
+            if let Some(first) = parts.first_mut() {
+                *first = format!("{}.md", first);
+            }
+            parts.join(" > ")
+        }
+    }
+
+    pub fn is_nested(&self) -> bool {
+        !self.page_stack.is_empty()
     }
 }
 
@@ -146,7 +193,6 @@ pub async fn run(
     };
 
     loop {
-        // Update wrap width
         let term_width = terminal.size()?.width;
         state.editor.wrap_width = term_width.saturating_sub(10);
 
@@ -214,7 +260,7 @@ pub async fn run(
             }
         }
 
-        // Check debounce: should we send to LLM?
+        // Check debounce
         if state.screen == Screen::Editor
             && state.llm_enabled
             && !state.in_flight
@@ -242,7 +288,6 @@ pub async fn run(
             }
         }
 
-        // Poll rate: fast during any animation
         let animating = state.animation.is_some()
             || state.startup_anim.is_some()
             || state.transition.is_some();
@@ -254,7 +299,6 @@ pub async fn run(
 
         if event::poll(poll_duration)? {
             if let Event::Key(key) = event::read()? {
-                // During startup animation, only allow quit
                 if state.startup_anim.is_some() {
                     if matches!(key.code, KeyCode::Esc)
                         || matches!(
@@ -270,14 +314,12 @@ pub async fn run(
                     continue;
                 }
 
-                // During transition, swallow all input
                 if state.transition.is_some() {
                     continue;
                 }
 
                 state.last_keypress = Instant::now();
 
-                // Cancel LLM animation on keypress
                 if let Some(anim) = state.animation.take() {
                     state.editor.replace_content(&anim.new_text);
                     state.editor.last_sent_hash = llm::content_hash(&anim.new_text);
@@ -320,10 +362,22 @@ fn handle_startup_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
 
             state.output_dir = dir;
             state.doc_title = sanitize_filename(&title);
-            // Switch to editor and start transition animation
+            state.current_file =
+                PathBuf::from(&state.output_dir).join(format!("{}.md", state.doc_title));
+            state.current_page_name = state.doc_title.clone();
+
+            // Load existing content if file exists
+            if state.current_file.exists() {
+                if let Ok(content) = fs::read_to_string(&state.current_file) {
+                    state.editor.set_content_with_cursor(&content, 0, 0);
+                    state.editor.modified = false;
+                }
+            }
+
             state.screen = Screen::Editor;
             state.transition = Some(TransitionAnim {
                 start: Instant::now(),
+                style: RevealStyle::Scatter,
             });
         }
         Action::Quit => {
@@ -348,7 +402,10 @@ fn handle_editor_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
             save_document(state)?;
         }
         Action::Quit => {
-            if state.editor.modified {
+            if state.is_nested() {
+                // Go back to parent page
+                navigate_back(state)?;
+            } else if state.editor.modified {
                 state.screen = Screen::QuitConfirm;
             } else {
                 state.should_quit = true;
@@ -364,10 +421,15 @@ fn handle_editor_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
                 };
             }
         }
+        Action::CreateLink => {
+            state.editor.create_link_at_cursor();
+        }
+        Action::OpenLink => {
+            navigate_into_link(state)?;
+        }
         Action::ForwardToEditor(key_event) => {
             state.editor.handle_key(key_event);
 
-            // Adjust debounce based on what was typed
             if matches!(key_event.code, KeyCode::Char(' ')) {
                 let (row, col) = state.editor.textarea.cursor();
                 let is_sentence_end = if let Some(line) = state.editor.textarea.lines().get(row) {
@@ -408,6 +470,99 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
     }
     Ok(())
 }
+
+// --- Graph-node navigation ---
+
+fn navigate_into_link(state: &mut AppState) -> Result<()> {
+    let link_name = match state.editor.find_link_at_cursor() {
+        Some(name) => name,
+        None => return Ok(()),
+    };
+
+    // Auto-save current page before navigating
+    save_document_quiet(state)?;
+
+    // Push current page onto stack
+    let current_content = state.editor.content();
+    let current_cursor = state.editor.textarea.cursor();
+    state.page_stack.push(PageEntry {
+        file_path: state.current_file.clone(),
+        display_name: state.current_page_name.clone(),
+        content: current_content,
+        cursor: current_cursor,
+        modified: state.editor.modified,
+        last_sent_hash: state.editor.last_sent_hash.clone(),
+    });
+
+    // Determine linked page path: {output_dir}/{doc_title}/{link_name}.md
+    let link_dir = PathBuf::from(&state.output_dir).join(&state.doc_title);
+    fs::create_dir_all(&link_dir)?;
+    let link_file = link_dir.join(format!("{}.md", link_name));
+
+    // Load linked page content
+    let content = if link_file.exists() {
+        fs::read_to_string(&link_file).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    // Replace editor with linked page
+    state.editor.set_content_with_cursor(&content, 0, 0);
+    state.editor.modified = false;
+    state.editor.last_sent_hash = String::new();
+
+    // Update tracking
+    state.current_file = link_file;
+    state.current_page_name = link_name;
+
+    // Zoom-in animation
+    state.transition = Some(TransitionAnim {
+        start: Instant::now(),
+        style: RevealStyle::ZoomIn,
+    });
+
+    Ok(())
+}
+
+fn navigate_back(state: &mut AppState) -> Result<()> {
+    // Auto-save the nested page
+    save_document_quiet(state)?;
+
+    // Pop parent page
+    let entry = match state.page_stack.pop() {
+        Some(e) => e,
+        None => return Ok(()),
+    };
+
+    // Restore editor state
+    let (row, col) = entry.cursor;
+    state.editor.set_content_with_cursor(&entry.content, row, col);
+    state.editor.modified = entry.modified;
+    state.editor.last_sent_hash = entry.last_sent_hash;
+
+    // Restore file tracking
+    state.current_file = entry.file_path;
+    state.current_page_name = entry.display_name;
+
+    // Zoom-out animation
+    state.transition = Some(TransitionAnim {
+        start: Instant::now(),
+        style: RevealStyle::ZoomOut,
+    });
+
+    Ok(())
+}
+
+/// Save without updating UI flash indicators.
+fn save_document_quiet(state: &AppState) -> Result<()> {
+    if let Some(parent) = state.current_file.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&state.current_file, state.editor.content())?;
+    Ok(())
+}
+
+// --- LLM ---
 
 fn handle_llm_response(state: &mut AppState, response: LlmResponse) {
     if response.rate_limited {
@@ -469,12 +624,10 @@ fn handle_llm_response(state: &mut AppState, response: LlmResponse) {
 }
 
 fn save_document(state: &mut AppState) -> Result<()> {
-    let dir = PathBuf::from(&state.output_dir);
-    fs::create_dir_all(&dir)?;
-
-    let filename = format!("{}.md", state.doc_title);
-    let path = dir.join(filename);
-    fs::write(&path, state.editor.content())?;
+    if let Some(parent) = state.current_file.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&state.current_file, state.editor.content())?;
 
     state.editor.modified = false;
     state.just_saved = true;

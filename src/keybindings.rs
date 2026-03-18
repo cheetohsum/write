@@ -5,6 +5,8 @@ pub enum Action {
     Save,
     Quit,
     ToggleLlm,
+    CreateLink,
+    OpenLink,
     Confirm,
     Cancel,
     Tab,
@@ -31,6 +33,16 @@ pub fn map_editor_key(key: KeyEvent) -> Action {
             modifiers: KeyModifiers::CONTROL,
             ..
         } => Action::ToggleLlm,
+        KeyEvent {
+            code: KeyCode::Char('g'),
+            modifiers: KeyModifiers::CONTROL,
+            ..
+        } => Action::CreateLink,
+        KeyEvent {
+            code: KeyCode::Char('o'),
+            modifiers: KeyModifiers::CONTROL,
+            ..
+        } => Action::OpenLink,
         _ => Action::ForwardToEditor(key),
     }
 }
