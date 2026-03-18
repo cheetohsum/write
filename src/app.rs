@@ -59,6 +59,13 @@ pub struct StartupAnim {
     pub start: Instant,
 }
 
+/// Visual dissolve on changed text positions (render-buffer only, no cursor movement)
+pub struct TextDissolve {
+    pub changed_positions: Vec<(usize, usize)>, // (doc_row, doc_col)
+    pub resolve_times: Vec<u64>,                // ms at which each position resolves
+    pub start: Instant,
+}
+
 pub struct TransitionAnim {
     pub start: Instant,
     pub style: RevealStyle,
@@ -94,6 +101,7 @@ pub struct AppState<'a> {
     pub should_quit: bool,
     pub words_since_send: u8,
     pub last_click: Option<(Instant, u16, u16)>,
+    pub text_dissolve: Option<TextDissolve>,
     pub startup_anim: Option<StartupAnim>,
     pub transition: Option<TransitionAnim>,
     pub editor_area: Rect,
@@ -145,6 +153,7 @@ impl<'a> AppState<'a> {
             should_quit: false,
             words_since_send: 0,
             last_click: None,
+            text_dissolve: None,
             editor_area: Rect::default(),
             startup_anim: Some(StartupAnim {
                 start: Instant::now(),
@@ -258,9 +267,14 @@ pub async fn run(
         }
 
         let status_flashing = state.llm_status_flash.map_or(false, |t| t.elapsed().as_millis() < 1500);
+        let text_dissolving = state.text_dissolve.as_ref().map_or(false, |d| d.start.elapsed().as_millis() < 450);
+        if !text_dissolving && state.text_dissolve.is_some() {
+            state.text_dissolve = None;
+        }
         let animating = state.startup_anim.is_some()
             || state.transition.is_some()
-            || status_flashing;
+            || status_flashing
+            || text_dissolving;
         let poll_duration = if animating {
             Duration::from_millis(30)
         } else {
@@ -648,13 +662,34 @@ fn handle_llm_response(state: &mut AppState, response: LlmResponse) {
         return;
     }
 
-    // Apply cleaned text directly
+    // Apply cleaned text and start visual dissolve on changed positions
     state.editor.replace_content(new_text);
     state.editor.wrap_all_lines();
     state.editor.last_sent_hash = llm::content_hash(new_text);
     state.llm_status = LlmStatus::Applied;
     state.llm_status_flash = Some(Instant::now());
     state.debounce_duration = Duration::from_millis(DEBOUNCE_IDLE_MS);
+
+    // Start per-character dissolve animation (render-buffer only)
+    if !changed.is_empty() {
+        let seed = Instant::now().elapsed().as_nanos() as u64;
+        let resolve_times: Vec<u64> = changed
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                let h = seed
+                    .wrapping_add(i as u64)
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                60 + ((h >> 33) % 340) // 60ms to 400ms
+            })
+            .collect();
+        state.text_dissolve = Some(TextDissolve {
+            changed_positions: changed,
+            resolve_times,
+            start: Instant::now(),
+        });
+    }
 }
 
 fn save_document(state: &mut AppState) -> Result<()> {

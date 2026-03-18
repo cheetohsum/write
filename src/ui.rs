@@ -303,6 +303,45 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Markdown rich text styling
     style_markdown(f.buffer_mut(), editor_outer[2]);
 
+    // Per-character dissolve on LLM-changed positions
+    if let Some(ref dissolve) = state.text_dissolve {
+        let elapsed = dissolve.start.elapsed().as_millis() as u64;
+        if elapsed < 450 {
+            let area = editor_outer[2];
+            // Estimate scroll offset (same as mouse click logic)
+            let (cur_row, _) = state.editor.textarea.cursor();
+            let viewport_h = area.height as usize;
+            let scroll_top = cur_row.saturating_sub(viewport_h.saturating_sub(1));
+
+            for (i, &(doc_row, doc_col)) in dissolve.changed_positions.iter().enumerate() {
+                // Map document position to screen position
+                if doc_row < scroll_top {
+                    continue;
+                }
+                let screen_row = doc_row - scroll_top;
+                if screen_row >= viewport_h {
+                    continue;
+                }
+                let sx = area.left() + doc_col as u16;
+                let sy = area.top() + screen_row as u16;
+                if sx >= area.right() || sy >= area.bottom() {
+                    continue;
+                }
+
+                // Only overlay if this position hasn't resolved yet
+                if elapsed < dissolve.resolve_times[i] {
+                    let cell = &mut f.buffer_mut()[(sx, sy)];
+                    let ch_hash = hash_position(sx, sy)
+                        .wrapping_add(elapsed / 40);
+                    let dither_ch = DITHER_CHARS[(ch_hash as usize) % DITHER_CHARS.len()];
+                    let dither_fg = DITHER_COLORS[((ch_hash >> 16) as usize) % DITHER_COLORS.len()];
+                    cell.set_char(dither_ch);
+                    cell.set_fg(dither_fg);
+                }
+            }
+        }
+    }
+
     // --- Info bar: word count + LLM status with flash dissolve ---
     let llm_status_text = match state.llm_status {
         LlmStatus::Disabled => "off",
