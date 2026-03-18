@@ -72,13 +72,18 @@ impl<'a> EditorState<'a> {
             None => return,
         };
 
+        // Move to the space that will become a newline
         self.textarea.move_cursor(CursorMove::Head);
         for _ in 0..break_at {
             self.textarea.move_cursor(CursorMove::Forward);
         }
 
+        // Replace space with newline
         self.textarea.delete_next_char();
         self.textarea.insert_newline();
+
+        // Move cursor to the end of the new wrapped line (where user is typing)
+        self.textarea.move_cursor(CursorMove::End);
     }
 
     /// Wrap all lines that exceed wrap_width. Called after LLM replacements.
