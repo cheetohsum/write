@@ -128,6 +128,10 @@ jobs:
           rm -rf artifacts/Write-macos-x86_64
           mv artifacts/Write-macos-x86_64.zip.tmp artifacts/Write-macos-x86_64.zip
 
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: assets
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -135,4 +139,6 @@ jobs:
             artifacts/Write-windows-x86_64.exe
             artifacts/Write-macos-aarch64.zip
             artifacts/Write-macos-x86_64.zip
+            assets/icon.png
+            assets/icon.ico
           generate_release_notes: true
