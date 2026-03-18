@@ -48,6 +48,9 @@ pub fn render(f: &mut Frame, state: &mut AppState) {
             apply_reveal_overlay(f.buffer_mut(), area, elapsed, 350, &trans.style);
         }
     }
+
+    // CRT post-processing — always last
+    apply_crt_effect(f.buffer_mut(), area);
 }
 
 fn render_startup(f: &mut Frame, state: &mut AppState, area: Rect) {
@@ -208,53 +211,74 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
     ])
     .split(area);
 
-    // Title bar with breadcrumb
+    // --- Centered title bar ---
     let breadcrumb = state.breadcrumb();
-    let modified_indicator = if state.editor.modified {
-        Span::styled(
-            "  ● ",
-            Style::default()
-                .fg(theme::MAROON)
-                .bg(theme::UMBER)
-                .add_modifier(Modifier::BOLD),
-        )
-    } else {
-        Span::styled("    ", theme::title_bar())
-    };
-
     let title_line = Line::from(vec![
         Span::styled(
-            "  write ",
+            "write",
             Style::default()
                 .fg(theme::GOLD)
                 .bg(theme::UMBER)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("│ ", Style::default().fg(theme::CLAY).bg(theme::UMBER)),
-        Span::styled(breadcrumb, theme::title_bar()),
-        modified_indicator,
+        Span::styled(" │ ", Style::default().fg(theme::CLAY).bg(theme::UMBER)),
+        Span::styled(&breadcrumb, theme::title_bar()),
+        if state.editor.modified {
+            Span::styled(
+                " ●",
+                Style::default()
+                    .fg(theme::MAROON)
+                    .bg(theme::UMBER)
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::styled("", theme::title_bar())
+        },
     ]);
     f.render_widget(
-        Paragraph::new(title_line).style(theme::title_bar()),
+        Paragraph::new(title_line)
+            .style(theme::title_bar())
+            .alignment(Alignment::Center),
         chunks[0],
     );
 
-    // Editor with horizontal padding
-    let editor_padded = Layout::horizontal([
-        Constraint::Length(5),
-        Constraint::Min(1),
-        Constraint::Length(5),
+    // --- Editor with borders and padding ---
+    let editor_outer = Layout::horizontal([
+        Constraint::Length(1), // left border
+        Constraint::Length(4), // left padding
+        Constraint::Min(1),   // editor
+        Constraint::Length(4), // right padding
+        Constraint::Length(1), // right border
     ])
     .split(chunks[1]);
+
+    // Left border
+    for y in editor_outer[0].top()..editor_outer[0].bottom() {
+        let cell = &mut f.buffer_mut()[(editor_outer[0].left(), y)];
+        cell.set_char('│');
+        cell.set_fg(theme::SANDSTONE);
+        cell.set_bg(theme::PARCHMENT);
+    }
+    // Right border
+    for y in editor_outer[4].top()..editor_outer[4].bottom() {
+        let cell = &mut f.buffer_mut()[(editor_outer[4].left(), y)];
+        cell.set_char('│');
+        cell.set_fg(theme::SANDSTONE);
+        cell.set_bg(theme::PARCHMENT);
+    }
+
+    // Padding fill
     let pad_bg = Block::default().style(theme::base());
-    f.render_widget(pad_bg.clone(), editor_padded[0]);
-    f.render_widget(pad_bg, editor_padded[2]);
-    f.render_widget(&state.editor.textarea, editor_padded[1]);
+    f.render_widget(pad_bg.clone(), editor_outer[1]);
+    f.render_widget(pad_bg, editor_outer[3]);
 
-    // Style [[wiki-links]] in the rendered buffer
-    style_markdown(f.buffer_mut(), editor_padded[1]);
+    // Editor textarea
+    f.render_widget(&state.editor.textarea, editor_outer[2]);
 
-    // Status bar
+    // Markdown rich text styling
+    style_markdown(f.buffer_mut(), editor_outer[2]);
+
+    // --- Centered status bar ---
     let llm_status_text = match state.llm_status {
         LlmStatus::Disabled => "LLM off",
         LlmStatus::Idle => "LLM idle",
@@ -273,40 +297,35 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
         _ => theme::SANDSTONE,
     };
 
-    let save_span = if state.just_saved {
+    let save_text = if state.just_saved { "saved" } else { "" };
+    let hints = if state.is_nested() {
+        "^S ^G ^O  Esc back  ^L"
+    } else {
+        "^S ^G ^O  ^Q  ^L"
+    };
+
+    let status_line = Line::from(vec![
         Span::styled(
-            " saved ",
+            save_text,
             Style::default()
                 .fg(theme::SAGE)
                 .bg(theme::UMBER)
                 .add_modifier(Modifier::BOLD),
-        )
-    } else {
-        Span::styled("  ", theme::status_bar())
-    };
-
-    let hints = if state.is_nested() {
-        "^S save  ^G link  ^O open  Esc back  ^L llm "
-    } else {
-        "^S save  ^G link  ^O open  ^Q quit  ^L llm "
-    };
-
-    let status_line = Line::from(vec![
-        save_span,
+        ),
         Span::styled(
-            format!(" {} words ", state.editor.word_count()),
+            format!("  {} words ", state.editor.word_count()),
             theme::status_bar(),
         ),
         Span::styled("│ ", Style::default().fg(theme::CLAY).bg(theme::UMBER)),
         Span::styled("● ", Style::default().fg(llm_dot_color).bg(theme::UMBER)),
-        Span::styled(llm_status_text, theme::status_bar()),
-        Span::styled(
-            format!(" │ {}", hints),
-            Style::default().fg(theme::CLAY).bg(theme::UMBER),
-        ),
+        Span::styled(format!("{} ", llm_status_text), theme::status_bar()),
+        Span::styled("│ ", Style::default().fg(theme::CLAY).bg(theme::UMBER)),
+        Span::styled(hints, Style::default().fg(theme::CLAY).bg(theme::UMBER)),
     ]);
     f.render_widget(
-        Paragraph::new(status_line).style(theme::status_bar()),
+        Paragraph::new(status_line)
+            .style(theme::status_bar())
+            .alignment(Alignment::Center),
         chunks[2],
     );
 }
@@ -593,6 +612,73 @@ fn style_line(buf: &mut Buffer, area: Rect, y: u16, from: usize, color: Color, b
 fn hide_range(buf: &mut Buffer, area: Rect, y: u16, from: usize, to: usize) {
     for i in from..=to {
         hide_char(buf, area, y, i);
+    }
+}
+
+// --- CRT post-processing effect ---
+
+fn apply_crt_effect(buf: &mut Buffer, area: Rect) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let cx = area.width as f64 / 2.0;
+    let cy = area.height as f64 / 2.0;
+    let max_dist = (cx * cx + cy * cy).sqrt();
+
+    for y in area.top()..area.bottom() {
+        let row_idx = y - area.top();
+
+        for x in area.left()..area.right() {
+            let x_ratio = (x - area.left()) as f64 / area.width as f64;
+
+            // Scan lines: dim every other row
+            let scanline = if row_idx % 2 == 1 { 0.93 } else { 1.0 };
+
+            // Vignette: gentle darkening at edges
+            let dx = (x - area.left()) as f64 - cx;
+            let dy = (y - area.top()) as f64 - cy;
+            let dist = (dx * dx + dy * dy).sqrt() / max_dist;
+            let vignette = 1.0 - (dist * dist * 0.25);
+
+            // Chromatic aberration: slight red shift left, blue shift right
+            let r_shift: f64 = if x_ratio < 0.12 {
+                1.06
+            } else if x_ratio > 0.88 {
+                0.96
+            } else {
+                1.0
+            };
+            let b_shift: f64 = if x_ratio > 0.88 {
+                1.06
+            } else if x_ratio < 0.12 {
+                0.96
+            } else {
+                1.0
+            };
+
+            let factor = scanline * vignette;
+
+            let cell = &mut buf[(x, y)];
+
+            // Foreground
+            if let Color::Rgb(r, g, b) = cell.fg {
+                cell.set_fg(Color::Rgb(
+                    ((r as f64) * factor * r_shift).min(255.0).max(0.0) as u8,
+                    ((g as f64) * factor).min(255.0).max(0.0) as u8,
+                    ((b as f64) * factor * b_shift).min(255.0).max(0.0) as u8,
+                ));
+            }
+
+            // Background (subtler)
+            if let Color::Rgb(r, g, b) = cell.bg {
+                let bg_v = 1.0 - (dist * dist * 0.12);
+                cell.set_bg(Color::Rgb(
+                    ((r as f64) * bg_v * r_shift).min(255.0).max(0.0) as u8,
+                    ((g as f64) * bg_v).min(255.0).max(0.0) as u8,
+                    ((b as f64) * bg_v * b_shift).min(255.0).max(0.0) as u8,
+                ));
+            }
+        }
     }
 }
 

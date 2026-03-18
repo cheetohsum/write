@@ -22,7 +22,7 @@ impl<'a> EditorState<'a> {
                 .bg(theme::WHEAT)
                 .fg(theme::WALNUT),
         );
-        textarea.set_line_number_style(theme::secondary());
+        // Line numbers disabled for clean writing experience
         textarea.set_block(ratatui::widgets::Block::default().style(theme::base()));
 
         EditorState {
