@@ -121,6 +121,7 @@ pub struct AppState<'a> {
     pub model_selected: usize,
     // Startup screen click areas
     pub dir_input_rect: Rect,
+    pub title_input_rect: Rect,
 }
 
 impl<'a> AppState<'a> {
@@ -187,6 +188,7 @@ impl<'a> AppState<'a> {
             openrouter_models: Vec::new(),
             model_selected: 0,
             dir_input_rect: Rect::default(),
+            title_input_rect: Rect::default(),
         }
     }
 
@@ -385,28 +387,37 @@ pub async fn run(
                     }
                 }
                 Event::Mouse(mouse) => {
-                    // Startup screen: click on dir input opens folder picker
+                    // Startup screen: click on inputs to focus them
                     if state.screen == Screen::Startup
                         && state.transition.is_none()
                         && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
                     {
-                        let r = state.dir_input_rect;
-                        if r.width > 0
-                            && mouse.column >= r.left()
-                            && mouse.column < r.right()
-                            && mouse.row >= r.top()
-                            && mouse.row < r.bottom()
+                        let dr = state.dir_input_rect;
+                        let tr = state.title_input_rect;
+                        if dr.width > 0
+                            && mouse.column >= dr.left()
+                            && mouse.column < dr.right()
+                            && mouse.row >= dr.top()
+                            && mouse.row < dr.bottom()
                         {
                             state.startup_field = 0;
+                            // Open folder picker
                             if let Some(path) = crate::config::pick_folder() {
                                 state.dir_input.select_all();
                                 state.dir_input.cut();
                                 state.dir_input.insert_str(&path);
                                 state.output_dir = path;
                             }
+                        } else if tr.width > 0
+                            && mouse.column >= tr.left()
+                            && mouse.column < tr.right()
+                            && mouse.row >= tr.top()
+                            && mouse.row < tr.bottom()
+                        {
+                            state.startup_field = 1;
                         }
                     }
-                    // Settings screen: click links or input fields
+                    // Settings screen: click links, input fields, or scroll dropdown
                     if state.screen == Screen::Settings
                         && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
                     {
@@ -430,6 +441,34 @@ pub async fn run(
                             {
                                 state.settings_field = i as u8;
                             }
+                        }
+                    }
+                    // Settings screen: mouse scroll to cycle models in dropdown
+                    if state.screen == Screen::Settings
+                        && state.settings_field == 3
+                        && !state.openrouter_models.is_empty()
+                    {
+                        let total = state.openrouter_models.len();
+                        let scrolled = match mouse.kind {
+                            MouseEventKind::ScrollDown => {
+                                state.model_selected = (state.model_selected + 1) % total;
+                                true
+                            }
+                            MouseEventKind::ScrollUp => {
+                                state.model_selected = if state.model_selected > 0 {
+                                    state.model_selected - 1
+                                } else {
+                                    total - 1
+                                };
+                                true
+                            }
+                            _ => false,
+                        };
+                        if scrolled {
+                            let model = state.openrouter_models[state.model_selected].clone();
+                            state.model_input.select_all();
+                            state.model_input.cut();
+                            state.model_input.insert_str(&model);
                         }
                     }
                     if state.screen == Screen::Editor

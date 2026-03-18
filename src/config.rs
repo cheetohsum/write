@@ -161,9 +161,19 @@ pub fn save_api_keys(keys: &[String; 3], preferred: Option<u8>, model: &str) {
         }
     }
 
-    if !model.is_empty() {
+    // Only save LLM_MODEL for OpenRouter — other providers have good defaults
+    // and an OpenRouter model name (e.g. "anthropic/claude-3.5-sonnet") would
+    // cause API errors if sent to OpenAI or Anthropic
+    let save_model = match preferred {
+        Some(2) => !model.is_empty(), // OpenRouter — save if set
+        None => !model.is_empty(),    // no preference — save if set
+        _ => false,                   // Claude/OpenAI — use defaults
+    };
+    if save_model {
         content.push_str(&format!("LLM_MODEL={}\n", model));
         env::set_var("LLM_MODEL", model);
+    } else {
+        env::remove_var("LLM_MODEL");
     }
 
     let _ = fs::write(env_file_path(), content);

@@ -190,6 +190,7 @@ fn render_startup(f: &mut Frame, state: &mut AppState, area: Rect) {
             .set_cursor_style(ratatui::style::Style::default());
         state.title_input.set_style(theme::input_inactive());
     }
+    state.title_input_rect = form_chunks[10];
     f.render_widget(&state.title_input, form_chunks[10]);
 
     f.render_widget(
