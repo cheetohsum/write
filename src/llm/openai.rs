@@ -7,7 +7,7 @@ use super::prompt::SYSTEM_PROMPT;
 struct ChatRequest {
     model: String,
     messages: Vec<Message>,
-    max_tokens: u32,
+    max_completion_tokens: u32,
 }
 
 #[derive(Serialize)]
@@ -50,7 +50,7 @@ pub async fn cleanup(
                 content: text.to_string(),
             },
         ],
-        max_tokens: 8192,
+        max_completion_tokens: 8192,
     };
 
     let resp = client
