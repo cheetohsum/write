@@ -73,6 +73,9 @@ pub fn map_startup_key(key: KeyEvent) -> Action {
 pub fn map_settings_key(key: KeyEvent) -> Action {
     match key {
         KeyEvent {
+            code: KeyCode::Enter, ..
+        } => Action::Confirm,
+        KeyEvent {
             code: KeyCode::Tab, ..
         } => Action::Tab,
         KeyEvent {

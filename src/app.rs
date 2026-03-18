@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use ratatui::Terminal;
@@ -114,6 +114,9 @@ pub struct AppState<'a> {
     pub settings_field: u8,
     pub settings_inputs: [TextArea<'a>; 3],
     pub settings_link_rects: [Rect; 3],
+    pub preferred_provider: Option<u8>,
+    // Startup screen click areas
+    pub dir_input_rect: Rect,
 }
 
 impl<'a> AppState<'a> {
@@ -174,6 +177,8 @@ impl<'a> AppState<'a> {
                 TextArea::default(),
             ],
             settings_link_rects: [Rect::default(); 3],
+            preferred_provider: crate::config::load_preferred_provider(),
+            dir_input_rect: Rect::default(),
         }
     }
 
@@ -292,6 +297,11 @@ pub async fn run(
         if event::poll(poll_duration)? {
             match event::read()? {
                 Event::Key(key) => {
+                    // Only handle Press events (skip Release/Repeat to prevent double-fire)
+                    if key.kind != KeyEventKind::Press {
+                        continue;
+                    }
+
                     if state.startup_anim.is_some() {
                         if matches!(key.code, KeyCode::Esc)
                             || matches!(
@@ -341,6 +351,27 @@ pub async fn run(
                     }
                 }
                 Event::Mouse(mouse) => {
+                    // Startup screen: click on dir input opens folder picker
+                    if state.screen == Screen::Startup
+                        && state.transition.is_none()
+                        && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+                    {
+                        let r = state.dir_input_rect;
+                        if r.width > 0
+                            && mouse.column >= r.left()
+                            && mouse.column < r.right()
+                            && mouse.row >= r.top()
+                            && mouse.row < r.bottom()
+                        {
+                            state.startup_field = 0;
+                            if let Some(path) = crate::config::pick_folder() {
+                                state.dir_input.select_all();
+                                state.dir_input.cut();
+                                state.dir_input.insert_str(&path);
+                                state.output_dir = path;
+                            }
+                        }
+                    }
                     // Settings screen: click links to open provider URLs
                     if state.screen == Screen::Settings
                         && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
@@ -596,6 +627,15 @@ fn handle_modal_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
 fn handle_settings_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
     let action = keybindings::map_settings_key(key);
     match action {
+        Action::Confirm => {
+            // Set this provider as preferred (if it has a key)
+            let idx = state.settings_field as usize;
+            let key_text = state.settings_inputs[idx].lines().join("");
+            if !key_text.trim().is_empty() {
+                state.preferred_provider = Some(state.settings_field);
+                save_settings(state);
+            }
+        }
         Action::Tab => {
             state.settings_field = (state.settings_field + 1) % 3;
         }
@@ -633,6 +673,7 @@ fn init_settings_inputs(state: &mut AppState) {
         }
     }
     state.settings_field = 0;
+    state.preferred_provider = crate::config::load_preferred_provider();
 }
 
 fn save_settings(state: &mut AppState) {
@@ -641,7 +682,7 @@ fn save_settings(state: &mut AppState) {
         state.settings_inputs[1].lines().join(""),
         state.settings_inputs[2].lines().join(""),
     ];
-    crate::config::save_api_keys(&keys);
+    crate::config::save_api_keys(&keys, state.preferred_provider);
     state.llm_config = crate::config::load_config();
     state.llm_enabled = state.llm_config.is_some();
     state.llm_status = if state.llm_config.is_some() {

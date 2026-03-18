@@ -107,11 +107,6 @@ fn env_file_path() -> PathBuf {
 }
 
 pub const PROVIDER_NAMES: [&str; 3] = ["Anthropic", "OpenAI", "OpenRouter"];
-pub const PROVIDER_URLS: [&str; 3] = [
-    "console.anthropic.com/settings/keys",
-    "platform.openai.com/api-keys",
-    "openrouter.ai/keys",
-];
 const PROVIDER_FULL_URLS: [&str; 3] = [
     "https://console.anthropic.com/settings/keys",
     "https://platform.openai.com/api-keys",
@@ -142,7 +137,7 @@ pub fn load_saved_keys() -> [String; 3] {
     keys
 }
 
-pub fn save_api_keys(keys: &[String; 3]) {
+pub fn save_api_keys(keys: &[String; 3], preferred: Option<u8>) {
     let dir = config_dir();
     let _ = fs::create_dir_all(&dir);
 
@@ -150,6 +145,19 @@ pub fn save_api_keys(keys: &[String; 3]) {
     for (i, name) in ENV_VAR_NAMES.iter().enumerate() {
         if !keys[i].is_empty() {
             content.push_str(&format!("{}={}\n", name, keys[i]));
+        }
+    }
+
+    if let Some(idx) = preferred {
+        let provider_name = match idx {
+            0 => "claude",
+            1 => "openai",
+            2 => "openrouter",
+            _ => "",
+        };
+        if !provider_name.is_empty() {
+            content.push_str(&format!("LLM_PROVIDER={}\n", provider_name));
+            env::set_var("LLM_PROVIDER", provider_name);
         }
     }
 
@@ -162,6 +170,47 @@ pub fn save_api_keys(keys: &[String; 3]) {
             env::remove_var(name);
         }
     }
+}
+
+pub fn load_preferred_provider() -> Option<u8> {
+    match env::var("LLM_PROVIDER").ok()?.to_lowercase().as_str() {
+        "claude" | "anthropic" => Some(0),
+        "openai" => Some(1),
+        "openrouter" => Some(2),
+        _ => None,
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn pick_folder() -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let output = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'Choose output directory'; if($d.ShowDialog() -eq 'OK'){Write-Output $d.SelectedPath}",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .ok()?;
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if path.is_empty() { None } else { Some(path) }
+}
+
+#[cfg(target_os = "macos")]
+pub fn pick_folder() -> Option<String> {
+    let output = std::process::Command::new("osascript")
+        .args(["-e", "POSIX path of (choose folder)"])
+        .output()
+        .ok()?;
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if path.is_empty() { None } else { Some(path) }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+pub fn pick_folder() -> Option<String> {
+    None
 }
 
 pub fn open_provider_url(index: usize) {

@@ -145,6 +145,7 @@ fn render_startup(f: &mut Frame, state: &mut AppState, area: Rect) {
             .set_cursor_style(ratatui::style::Style::default());
         state.dir_input.set_style(theme::input_inactive());
     }
+    state.dir_input_rect = form_chunks[8];
     f.render_widget(&state.dir_input, form_chunks[8]);
 
     f.render_widget(
@@ -285,38 +286,45 @@ fn render_settings(f: &mut Frame, state: &mut AppState, area: Rect) {
     // Provider fields
     let label_indices = [6, 8, 10];
     let input_indices = [7, 9, 11];
-    let link_style = Style::default()
-        .fg(theme::TERRACOTTA)
-        .bg(theme::PARCHMENT)
-        .add_modifier(Modifier::UNDERLINED);
+    let link_btn_style = Style::default()
+        .fg(theme::CREAM)
+        .bg(theme::TERRACOTTA)
+        .add_modifier(Modifier::BOLD);
 
     for i in 0..3 {
         let label_chunk = form_chunks[label_indices[i]];
         let input_chunk = form_chunks[input_indices[i]];
 
-        // Label row: split into label (left) and link (right)
-        let link_text = crate::config::PROVIDER_URLS[i];
-        let link_display = format!("{} ↗", link_text);
-        let link_width = link_display.chars().count() as u16 + 1; // +1 for padding
+        // Preferred provider indicator
+        let is_preferred = state.preferred_provider == Some(i as u8);
+        let indicator = if is_preferred { "◆ " } else { "◇ " };
+        let indicator_style = if is_preferred {
+            Style::default().fg(theme::GOLD).bg(theme::PARCHMENT)
+        } else {
+            Style::default().fg(theme::SANDSTONE).bg(theme::PARCHMENT)
+        };
 
+        // Label row: split into label (left) and link button (right)
+        let link_width: u16 = 9; // " ✦ Keys "
         let label_link_chunks = Layout::horizontal([
             Constraint::Min(1),
             Constraint::Length(link_width),
         ])
         .split(label_chunk);
 
-        // Label
+        // Label with preferred indicator
         f.render_widget(
-            Paragraph::new(Span::styled(
-                format!("  {}", crate::config::PROVIDER_NAMES[i]),
-                theme::label(),
-            )),
+            Paragraph::new(Line::from(vec![
+                Span::styled("  ", theme::base()),
+                Span::styled(indicator, indicator_style),
+                Span::styled(crate::config::PROVIDER_NAMES[i], theme::label()),
+            ])),
             label_link_chunks[0],
         );
 
-        // Link button
+        // Pretty link button
         f.render_widget(
-            Paragraph::new(Span::styled(&link_display, link_style)),
+            Paragraph::new(Span::styled(" ✦ Keys ", link_btn_style)),
             label_link_chunks[1],
         );
 
@@ -362,8 +370,8 @@ fn render_settings(f: &mut Frame, state: &mut AppState, area: Rect) {
             Span::styled("  ", theme::base()),
             Span::styled("tab", key_style),
             Span::styled(" switch  ", theme::hint()),
-            Span::styled("^O", key_style),
-            Span::styled(" open link  ", theme::hint()),
+            Span::styled("enter", key_style),
+            Span::styled(" prefer  ", theme::hint()),
             Span::styled("esc", key_style),
             Span::styled(" back", theme::hint()),
         ])),
@@ -395,8 +403,20 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // --- Padding rows ---
     f.render_widget(Block::default().style(theme::title_bar()), chunks[1]); // above title
-    f.render_widget(Block::default().style(theme::base()), chunks[3]);      // below title
     f.render_widget(Block::default().style(theme::base()), chunks[5]);      // above info bar
+
+    // --- Gold accent line below title bar ---
+    {
+        let accent_area = chunks[3];
+        let accent_line = "─".repeat(accent_area.width as usize);
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                &accent_line,
+                Style::default().fg(theme::GOLD).bg(theme::PARCHMENT),
+            )),
+            accent_area,
+        );
+    }
 
     // --- Centered title bar with icon ---
     let breadcrumb = state.breadcrumb();
@@ -413,7 +433,7 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
                 .bg(theme::UMBER)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("  │  ", Style::default().fg(theme::CLAY).bg(theme::UMBER)),
+        Span::styled("  ·  ", Style::default().fg(theme::CLAY).bg(theme::UMBER)),
         Span::styled(&breadcrumb, theme::title_bar()),
         if state.editor.modified {
             Span::styled(
@@ -434,49 +454,33 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
         chunks[2],
     );
 
-    // --- Editor with dark side borders and padding ---
+    // --- Editor with padding ---
     let editor_outer = Layout::horizontal([
-        Constraint::Length(1), // left dark edge
-        Constraint::Length(4), // left padding
+        Constraint::Length(5), // left padding
         Constraint::Min(1),   // editor
-        Constraint::Length(4), // right padding
-        Constraint::Length(1), // right dark edge
+        Constraint::Length(5), // right padding
     ])
     .split(chunks[4]);
 
     // Store editor area for mouse click mapping
-    state.editor_area = editor_outer[2];
-
-    // Dark side edges
-    for y in editor_outer[0].top()..editor_outer[0].bottom() {
-        let cell = &mut f.buffer_mut()[(editor_outer[0].left(), y)];
-        cell.set_char('▏');
-        cell.set_fg(theme::WALNUT);
-        cell.set_bg(theme::PARCHMENT);
-    }
-    for y in editor_outer[4].top()..editor_outer[4].bottom() {
-        let cell = &mut f.buffer_mut()[(editor_outer[4].left(), y)];
-        cell.set_char('▕');
-        cell.set_fg(theme::WALNUT);
-        cell.set_bg(theme::PARCHMENT);
-    }
+    state.editor_area = editor_outer[1];
 
     // Padding fill
     let pad_bg = Block::default().style(theme::base());
-    f.render_widget(pad_bg.clone(), editor_outer[1]);
-    f.render_widget(pad_bg, editor_outer[3]);
+    f.render_widget(pad_bg.clone(), editor_outer[0]);
+    f.render_widget(pad_bg, editor_outer[2]);
 
     // Editor textarea
-    f.render_widget(&state.editor.textarea, editor_outer[2]);
+    f.render_widget(&state.editor.textarea, editor_outer[1]);
 
     // Markdown rich text styling
-    style_markdown(f.buffer_mut(), editor_outer[2]);
+    style_markdown(f.buffer_mut(), editor_outer[1]);
 
     // Per-character dissolve on LLM-changed positions
     if let Some(ref dissolve) = state.text_dissolve {
         let elapsed = dissolve.start.elapsed().as_millis() as u64;
         if elapsed < 450 {
-            let area = editor_outer[2];
+            let area = editor_outer[1];
             // Estimate scroll offset (same as mouse click logic)
             let (cur_row, _) = state.editor.textarea.cursor();
             let viewport_h = area.height as usize;
