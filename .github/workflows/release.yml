@@ -19,9 +19,11 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Convert SVG to ICO
+      - name: Verify icon exists
         shell: bash
-        run: magick assets/icon.svg -define icon:auto-resize=256,128,64,48,32,16 assets/icon.ico
+        run: |
+          test -f assets/icon.ico || { echo "ERROR: assets/icon.ico not found"; exit 1; }
+          echo "Icon file: $(wc -c < assets/icon.ico) bytes"
 
       - name: Build
         run: cargo build --release --target x86_64-pc-windows-msvc
