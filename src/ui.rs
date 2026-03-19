@@ -51,7 +51,18 @@ pub fn render(f: &mut Frame, state: &mut AppState) {
     }
 
     // CRT post-processing — always last
-    apply_crt_effect(f.buffer_mut(), area);
+    // Exclude the bottom 3 rows (info bar, command bar, edge) on editor screens
+    // to prevent rendering artifacts from the vignette/scanline/aberration math
+    // interacting with Windows Terminal's Unicode character handling.
+    let crt_area = if matches!(state.screen, Screen::Editor | Screen::QuitConfirm) {
+        Rect {
+            height: area.height.saturating_sub(3),
+            ..area
+        }
+    } else {
+        area
+    };
+    apply_crt_effect(f.buffer_mut(), crt_area);
 }
 
 fn render_startup(f: &mut Frame, state: &mut AppState, area: Rect) {
@@ -743,12 +754,14 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
     }
 
     // --- Info bar: word count + LLM status with flash dissolve ---
+    // Rendered via direct buffer writes to avoid Paragraph/Center artifacts
+    // on Windows Terminal (unicode width + escape sequence issues).
     let llm_status_text = match state.llm_status {
         LlmStatus::Disabled => "off",
         LlmStatus::Idle => "",
         LlmStatus::Waiting => "waiting",
         LlmStatus::Cleaning => "cleaning...",
-        LlmStatus::Applied => "applied ✓",
+        LlmStatus::Applied => "applied +",
         LlmStatus::Error => "error",
         LlmStatus::Off => "paused",
     };
@@ -768,79 +781,110 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
         false
     };
 
-    let save_span = if state.just_saved {
-        Span::styled(
-            " ✓ saved ",
-            Style::default()
-                .fg(theme::SAGE)
-                .bg(theme::UMBER)
-                .add_modifier(Modifier::BOLD),
-        )
-    } else {
-        Span::styled("", theme::status_bar())
-    };
+    {
+        let buf = f.buffer_mut();
+        buf.set_style(chunks[6], theme::status_bar());
 
-    let mut info_spans = vec![
-        save_span,
-        Span::styled(
-            "  ✦ ",
+        // Left side: mode label (clickable to cycle) + settings button
+        let mode_label = format!(" {} ", state.writing_mode.label());
+        let mode_label_len = mode_label.len() as u16;
+        let settings_label = " settings ";
+        let settings_label_len = settings_label.len() as u16;
+
+        let mode_style = Style::default()
+            .fg(theme::CREAM)
+            .bg(theme::TERRACOTTA)
+            .add_modifier(Modifier::BOLD);
+        let settings_style = Style::default()
+            .fg(theme::SANDSTONE)
+            .bg(theme::UMBER);
+
+        let left_line = Line::from(vec![
+            Span::styled("  ", theme::status_bar()),
+            Span::styled(&mode_label, mode_style),
+            Span::styled("  ", theme::status_bar()),
+            Span::styled(settings_label, settings_style),
+        ]);
+        buf.set_line(chunks[6].left(), chunks[6].top(), &left_line, chunks[6].width);
+
+        // Store click rects for mode and settings
+        let mode_x = chunks[6].left() + 2; // after "  " padding
+        state.mode_rect = Rect::new(mode_x, chunks[6].top(), mode_label_len, 1);
+        let settings_x = mode_x + mode_label_len + 2; // after mode + "  " gap
+        state.settings_btn_rect = Rect::new(settings_x, chunks[6].top(), settings_label_len, 1);
+
+        // Center: word count + LLM status
+        let mut info_spans: Vec<Span> = Vec::new();
+        if state.just_saved {
+            info_spans.push(Span::styled(
+                " + saved ",
+                Style::default()
+                    .fg(theme::SAGE)
+                    .bg(theme::UMBER)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        info_spans.push(Span::styled(
+            "  * ",
             Style::default().fg(theme::GOLD).bg(theme::UMBER),
-        ),
-        Span::styled(
+        ));
+        info_spans.push(Span::styled(
             format!("{}", state.editor.word_count()),
             theme::status_bar(),
-        ),
-        Span::styled("   ", theme::status_bar()),
-        Span::styled(
-            "⟡ ",
+        ));
+        info_spans.push(Span::styled("   ", theme::status_bar()));
+        info_spans.push(Span::styled(
+            "* ",
             Style::default().fg(llm_icon_color).bg(theme::UMBER),
-        ),
-    ];
-    if show_status_text && !llm_status_text.is_empty() {
-        info_spans.push(Span::styled(llm_status_text, theme::status_bar()));
-    }
+        ));
+        if show_status_text && !llm_status_text.is_empty() {
+            info_spans.push(Span::styled(llm_status_text, theme::status_bar()));
+        }
 
-    f.render_widget(
-        Paragraph::new(Line::from(info_spans))
-            .style(theme::status_bar())
-            .alignment(Alignment::Center),
-        chunks[6],
-    );
+        let info_line = Line::from(info_spans);
+        let info_w = info_line.width() as u16;
+        let info_x = chunks[6].left() + chunks[6].width.saturating_sub(info_w) / 2;
+        buf.set_line(info_x, chunks[6].top(), &info_line, info_w);
+    }
 
     // --- Command bar ---
-    let cmd_style = Style::default().fg(theme::SANDSTONE).bg(theme::UMBER);
-    let key_style = Style::default()
-        .fg(theme::CREAM)
-        .bg(theme::UMBER)
-        .add_modifier(Modifier::BOLD);
+    // Also rendered via direct buffer writes.
+    {
+        let cmd_style = Style::default().fg(theme::SANDSTONE).bg(theme::UMBER);
+        let key_style = Style::default()
+            .fg(theme::CREAM)
+            .bg(theme::UMBER)
+            .add_modifier(Modifier::BOLD);
 
-    let mut cmd_spans = vec![
-        Span::styled("^S", key_style),
-        Span::styled(" save  ", cmd_style),
-        Span::styled("^G", key_style),
-        Span::styled(" link  ", cmd_style),
-        Span::styled("^O", key_style),
-        Span::styled(" open  ", cmd_style),
-        Span::styled("^A", key_style),
-        Span::styled(" all  ", cmd_style),
-        Span::styled("^L", key_style),
-        Span::styled(" llm  ", cmd_style),
-        Span::styled("Esc", key_style),
-    ];
-    if state.is_nested() {
-        cmd_spans.push(Span::styled(" back  ", cmd_style));
-    } else {
-        cmd_spans.push(Span::styled(" back  ", cmd_style));
-        cmd_spans.push(Span::styled("^Q", key_style));
-        cmd_spans.push(Span::styled(" quit", cmd_style));
+        let mut cmd_spans = vec![
+            Span::styled("^S", key_style),
+            Span::styled(" save  ", cmd_style),
+            Span::styled("^G", key_style),
+            Span::styled(" link  ", cmd_style),
+            Span::styled("^O", key_style),
+            Span::styled(" open  ", cmd_style),
+            Span::styled("^A", key_style),
+            Span::styled(" all  ", cmd_style),
+            Span::styled("^L", key_style),
+            Span::styled(" llm  ", cmd_style),
+            Span::styled("Esc", key_style),
+        ];
+        if state.is_nested() {
+            cmd_spans.push(Span::styled(" back  ", cmd_style));
+        } else {
+            cmd_spans.push(Span::styled(" back  ", cmd_style));
+            cmd_spans.push(Span::styled("^Q", key_style));
+            cmd_spans.push(Span::styled(" quit", cmd_style));
+        }
+
+        let buf = f.buffer_mut();
+        buf.set_style(chunks[7], theme::status_bar());
+
+        let cmd_line = Line::from(cmd_spans);
+        let cmd_w = cmd_line.width() as u16;
+        let cmd_x = chunks[7].left() + chunks[7].width.saturating_sub(cmd_w) / 2;
+        buf.set_line(cmd_x, chunks[7].top(), &cmd_line, cmd_w);
     }
-
-    f.render_widget(
-        Paragraph::new(Line::from(cmd_spans))
-            .style(theme::status_bar())
-            .alignment(Alignment::Center),
-        chunks[7],
-    );
 
     // Apply dither dissolve to status text when flash is fading out
     if let Some(flash_start) = state.llm_status_flash {
@@ -855,7 +899,7 @@ fn render_editor(f: &mut Frame, state: &mut AppState, area: Rect) {
                 if fade_progress > threshold {
                     let cell = &mut f.buffer_mut()[(x, info_area.top())];
                     let sym = cell.symbol().chars().next().unwrap_or(' ');
-                    if sym.is_alphabetic() || sym == '.' || sym == '✓' {
+                    if sym.is_alphabetic() || sym == '.' || sym == '+' {
                         cell.set_char(' ');
                     }
                 }
@@ -1195,6 +1239,11 @@ fn apply_crt_effect(buf: &mut Buffer, area: Rect) {
             let factor = scanline * vignette;
 
             let cell = &mut buf[(x, y)];
+
+            // Skip continuation cells of wide Unicode characters
+            if cell.symbol().is_empty() {
+                continue;
+            }
 
             // Foreground
             if let Color::Rgb(r, g, b) = cell.fg {

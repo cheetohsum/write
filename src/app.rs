@@ -124,6 +124,11 @@ pub struct AppState<'a> {
     // Startup screen click areas
     pub dir_input_rect: Rect,
     pub title_input_rect: Rect,
+    // Editor bottom bar click areas
+    pub mode_rect: Rect,
+    pub settings_btn_rect: Rect,
+    // Track where settings was opened from so Back returns correctly
+    pub settings_return_screen: Option<Screen>,
 }
 
 impl<'a> AppState<'a> {
@@ -192,6 +197,9 @@ impl<'a> AppState<'a> {
             model_selected: 0,
             dir_input_rect: Rect::default(),
             title_input_rect: Rect::default(),
+            mode_rect: Rect::default(),
+            settings_btn_rect: Rect::default(),
+            settings_return_screen: None,
         }
     }
 
@@ -323,6 +331,8 @@ pub async fn run(
         };
 
         if event::poll(poll_duration)? {
+            let prev_screen = state.screen.clone();
+
             match event::read()? {
                 Event::Key(key) => {
                     // Only handle Press events (skip Release/Repeat to prevent double-fire)
@@ -350,44 +360,7 @@ pub async fn run(
                     }
 
                     state.last_keypress = Instant::now();
-
-                    let prev_screen = state.screen.clone();
                     handle_key(&mut state, key)?;
-
-                    // Handle screen transitions
-                    if prev_screen != state.screen {
-                        match (&prev_screen, &state.screen) {
-                            (_, Screen::Settings) => {
-                                // Fetch OpenRouter models if not already loaded
-                                if state.openrouter_models.is_empty() {
-                                    let tx = models_tx.clone();
-                                    tokio::spawn(async move {
-                                        let _ = tx
-                                            .send(fetch_openrouter_models().await)
-                                            .await;
-                                    });
-                                }
-                            }
-                            (_, Screen::Editor) => {
-                                // Entering editor — spawn LLM if configured
-                                if let Some(ref cfg) = state.llm_config {
-                                    let (tx, rx) = llm::spawn_llm_task(cfg.clone());
-                                    llm_tx = Some(tx);
-                                    llm_rx = Some(rx);
-                                }
-                            }
-                            (Screen::Editor, _) => {
-                                // Leaving editor — drop LLM channels
-                                llm_tx = None;
-                                llm_rx = None;
-                            }
-                            _ => {}
-                        }
-                    }
-
-                    if state.should_quit {
-                        break;
-                    }
                 }
                 Event::Mouse(mouse) => {
                     // Startup screen: click on inputs to focus them
@@ -504,6 +477,51 @@ pub async fn run(
                             state.editor.textarea.move_cursor(direction);
                         }
                     }
+                    // Editor: click mode label to cycle writing mode
+                    if state.screen == Screen::Editor
+                        && state.transition.is_none()
+                        && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+                    {
+                        let mr = state.mode_rect;
+                        if mr.width > 0
+                            && mouse.column >= mr.left()
+                            && mouse.column < mr.right()
+                            && mouse.row >= mr.top()
+                            && mouse.row < mr.bottom()
+                        {
+                            state.writing_mode = state.writing_mode.next();
+                            // Persist and reload config with new mode
+                            let keys = crate::config::load_saved_keys();
+                            crate::config::save_api_keys(
+                                &keys,
+                                state.preferred_provider,
+                                &state.model_input.lines().join(""),
+                                state.writing_mode,
+                            );
+                            state.llm_config = crate::config::load_config();
+                        }
+
+                        let sr = state.settings_btn_rect;
+                        if sr.width > 0
+                            && mouse.column >= sr.left()
+                            && mouse.column < sr.right()
+                            && mouse.row >= sr.top()
+                            && mouse.row < sr.bottom()
+                        {
+                            // Auto-save before leaving editor
+                            if state.editor.modified && !state.editor.content().trim().is_empty() {
+                                let _ = save_document(&mut state);
+                            }
+                            init_settings_inputs(&mut state);
+                            state.settings_return_screen = Some(Screen::Editor);
+                            state.screen = Screen::Settings;
+                            state.transition = Some(TransitionAnim {
+                                start: Instant::now(),
+                                style: RevealStyle::Scatter,
+                            });
+                        }
+                    }
+                    // Editor: click in text area to position cursor
                     if state.screen == Screen::Editor
                         && state.transition.is_none()
                         && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
@@ -563,6 +581,38 @@ pub async fn run(
                 }
                 _ => {}
             }
+
+            // Handle screen transitions (for both key and mouse events)
+            if prev_screen != state.screen {
+                match (&prev_screen, &state.screen) {
+                    (_, Screen::Settings) => {
+                        if state.openrouter_models.is_empty() {
+                            let tx = models_tx.clone();
+                            tokio::spawn(async move {
+                                let _ = tx
+                                    .send(fetch_openrouter_models().await)
+                                    .await;
+                            });
+                        }
+                    }
+                    (_, Screen::Editor) => {
+                        if let Some(ref cfg) = state.llm_config {
+                            let (tx, rx) = llm::spawn_llm_task(cfg.clone());
+                            llm_tx = Some(tx);
+                            llm_rx = Some(rx);
+                        }
+                    }
+                    (Screen::Editor, _) => {
+                        llm_tx = None;
+                        llm_rx = None;
+                    }
+                    _ => {}
+                }
+            }
+
+            if state.should_quit {
+                break;
+            }
         }
     }
 
@@ -588,6 +638,7 @@ fn handle_startup_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
             if state.startup_field == 2 {
                 // Open settings
                 init_settings_inputs(state);
+                state.settings_return_screen = Some(Screen::Startup);
                 state.screen = Screen::Settings;
                 state.transition = Some(TransitionAnim {
                     start: Instant::now(),
@@ -767,7 +818,8 @@ fn handle_settings_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
         }
         Action::Back => {
             save_settings(state);
-            state.screen = Screen::Startup;
+            let return_to = state.settings_return_screen.take().unwrap_or(Screen::Startup);
+            state.screen = return_to;
             state.transition = Some(TransitionAnim {
                 start: Instant::now(),
                 style: RevealStyle::ZoomOut,
