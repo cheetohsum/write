@@ -226,7 +226,7 @@ fn render_startup(f: &mut Frame, state: &mut AppState, area: Rect) {
 fn render_settings(f: &mut Frame, state: &mut AppState, area: Rect) {
     let chunks = Layout::vertical([
         Constraint::Min(1),
-        Constraint::Length(26),
+        Constraint::Length(30),
         Constraint::Min(1),
     ])
     .split(area);
@@ -249,9 +249,13 @@ fn render_settings(f: &mut Frame, state: &mut AppState, area: Rect) {
         Constraint::Length(3), // [11] OpenRouter input
         Constraint::Length(1), // [12] Model label
         Constraint::Length(3), // [13] Model input
-        Constraint::Length(1), // [14] bottom decorative line
-        Constraint::Length(1), // [15] blank
-        Constraint::Length(1), // [16] hints bar
+        Constraint::Length(1), // [14] blank separator
+        Constraint::Length(1), // [15] "── Writing mode ──" subtitle
+        Constraint::Length(1), // [16] Writing Mode label
+        Constraint::Length(1), // [17] Writing Mode selector
+        Constraint::Length(1), // [18] bottom decorative line
+        Constraint::Length(1), // [19] blank
+        Constraint::Length(1), // [20] hints bar
     ])
     .split(form_area);
 
@@ -410,10 +414,56 @@ fn render_settings(f: &mut Frame, state: &mut AppState, area: Rect) {
         f.render_widget(&state.model_input, form_chunks[13]);
     }
 
+    // Writing mode section
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("── ", theme::decorative_line_subtle()),
+            Span::styled("Writing mode", theme::secondary()),
+            Span::styled(" ──", theme::decorative_line_subtle()),
+        ]))
+        .alignment(Alignment::Center),
+        form_chunks[15],
+    );
+
+    f.render_widget(
+        Paragraph::new(Span::styled("  Mode", theme::label())),
+        form_chunks[16],
+    );
+
+    {
+        let is_active = state.settings_field == 4;
+        let mode_label = state.writing_mode.label();
+        let style = if is_active {
+            Style::default()
+                .fg(theme::CREAM)
+                .bg(theme::TERRACOTTA)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            theme::input_inactive()
+        };
+        let arrow_style = if is_active {
+            Style::default()
+                .fg(theme::CREAM)
+                .bg(theme::TERRACOTTA)
+        } else {
+            theme::hint()
+        };
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled("  ", theme::base()),
+                Span::styled("◂ ", arrow_style),
+                Span::styled(format!(" {} ", mode_label), style),
+                Span::styled(" ▸", arrow_style),
+            ])),
+            form_chunks[17],
+        );
+        state.settings_input_rects[4] = form_chunks[17];
+    }
+
     // Bottom decorative line
     f.render_widget(
         Paragraph::new(Span::styled(&mid_line, theme::decorative_line_subtle())),
-        form_chunks[14],
+        form_chunks[18],
     );
 
     // Hints bar
@@ -428,7 +478,7 @@ fn render_settings(f: &mut Frame, state: &mut AppState, area: Rect) {
             Span::styled("esc", key_style),
             Span::styled(" back", theme::hint()),
         ])),
-        form_chunks[16],
+        form_chunks[20],
     );
 
     // Model dropdown overlay — shown when model field is active and models are loaded

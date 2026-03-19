@@ -5,6 +5,7 @@ pub async fn cleanup(
     api_key: &str,
     model: &str,
     text: &str,
+    system_prompt: &str,
 ) -> Result<String> {
     super::openai::cleanup(
         client,
@@ -12,6 +13,7 @@ pub async fn cleanup(
         model,
         text,
         "https://openrouter.ai/api/v1/chat/completions",
+        system_prompt,
     )
     .await
 }

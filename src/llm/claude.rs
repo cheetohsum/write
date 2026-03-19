@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use super::prompt::SYSTEM_PROMPT;
 
 #[derive(Serialize)]
 struct ClaudeRequest {
@@ -32,11 +31,12 @@ pub async fn cleanup(
     api_key: &str,
     model: &str,
     text: &str,
+    system_prompt: &str,
 ) -> Result<String> {
     let body = ClaudeRequest {
         model: model.to_string(),
         max_tokens: 8192,
-        system: SYSTEM_PROMPT.to_string(),
+        system: system_prompt.to_string(),
         messages: vec![Message {
             role: "user".to_string(),
             content: text.to_string(),

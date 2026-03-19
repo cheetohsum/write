@@ -12,7 +12,7 @@ use tui_textarea::CursorMove;
 use tokio::sync::mpsc;
 use tui_textarea::TextArea;
 
-use crate::config::LlmConfig;
+use crate::config::{LlmConfig, WritingMode};
 use crate::editor::EditorState;
 use crate::keybindings::{self, Action};
 use crate::llm::{self, LlmRequest, LlmResponse};
@@ -115,8 +115,9 @@ pub struct AppState<'a> {
     pub settings_field: u8,
     pub settings_inputs: [TextArea<'a>; 3],
     pub settings_link_rects: [Rect; 3],
-    pub settings_input_rects: [Rect; 4],
+    pub settings_input_rects: [Rect; 5],
     pub preferred_provider: Option<u8>,
+    pub writing_mode: WritingMode,
     pub model_input: TextArea<'a>,
     pub openrouter_models: Vec<String>,
     pub model_selected: usize,
@@ -183,8 +184,9 @@ impl<'a> AppState<'a> {
                 TextArea::default(),
             ],
             settings_link_rects: [Rect::default(); 3],
-            settings_input_rects: [Rect::default(); 4],
+            settings_input_rects: [Rect::default(); 5],
             preferred_provider: crate::config::load_preferred_provider(),
+            writing_mode: crate::config::load_writing_mode(),
             model_input: TextArea::default(),
             openrouter_models: Vec::new(),
             model_selected: 0,
@@ -487,6 +489,21 @@ pub async fn run(
                             state.model_input.insert_str(&model);
                         }
                     }
+                    // Editor screen: mouse scroll to move cursor up/down
+                    if state.screen == Screen::Editor
+                        && state.transition.is_none()
+                        && matches!(mouse.kind, MouseEventKind::ScrollUp | MouseEventKind::ScrollDown)
+                    {
+                        let lines = 3;
+                        let direction = if matches!(mouse.kind, MouseEventKind::ScrollUp) {
+                            CursorMove::Up
+                        } else {
+                            CursorMove::Down
+                        };
+                        for _ in 0..lines {
+                            state.editor.textarea.move_cursor(direction);
+                        }
+                    }
                     if state.screen == Screen::Editor
                         && state.transition.is_none()
                         && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
@@ -736,13 +753,17 @@ fn handle_settings_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
                     state.preferred_provider = Some(state.settings_field);
                     save_settings(state);
                 }
+            } else if idx == 4 {
+                // Writing mode: cycle to next
+                state.writing_mode = state.writing_mode.next();
+                save_settings(state);
             } else {
                 // Model field: just save
                 save_settings(state);
             }
         }
         Action::Tab => {
-            state.settings_field = (state.settings_field + 1) % 4;
+            state.settings_field = (state.settings_field + 1) % 5;
         }
         Action::Back => {
             save_settings(state);
@@ -761,6 +782,21 @@ fn handle_settings_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
         }
         Action::ForwardToEditor(key_event) => {
             let idx = state.settings_field as usize;
+            // Writing mode field: Left/Up = prev, Right/Down = next
+            if idx == 4 {
+                match key_event.code {
+                    KeyCode::Left | KeyCode::Up => {
+                        state.writing_mode = state.writing_mode.prev();
+                        save_settings(state);
+                    }
+                    KeyCode::Right | KeyCode::Down => {
+                        state.writing_mode = state.writing_mode.next();
+                        save_settings(state);
+                    }
+                    _ => {}
+                }
+                return Ok(());
+            }
             // Model field: Up/Down cycle through loaded OpenRouter models
             if idx == 3 && !state.openrouter_models.is_empty() {
                 if matches!(key_event.code, KeyCode::Up) {
@@ -787,7 +823,7 @@ fn handle_settings_key(state: &mut AppState, key: KeyEvent) -> Result<()> {
             }
             if idx < 3 {
                 state.settings_inputs[idx].input(key_event);
-            } else {
+            } else if idx == 3 {
                 state.model_input.input(key_event);
             }
         }
@@ -813,6 +849,7 @@ fn init_settings_inputs(state: &mut AppState) {
     }
     state.settings_field = 0;
     state.preferred_provider = crate::config::load_preferred_provider();
+    state.writing_mode = crate::config::load_writing_mode();
 }
 
 fn save_settings(state: &mut AppState) {
@@ -822,7 +859,7 @@ fn save_settings(state: &mut AppState) {
         state.settings_inputs[2].lines().join(""),
     ];
     let model = state.model_input.lines().join("");
-    crate::config::save_api_keys(&keys, state.preferred_provider, &model);
+    crate::config::save_api_keys(&keys, state.preferred_provider, &model, state.writing_mode);
     state.llm_config = crate::config::load_config();
     state.llm_enabled = state.llm_config.is_some();
     state.llm_status = if state.llm_config.is_some() {

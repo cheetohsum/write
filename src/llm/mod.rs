@@ -68,8 +68,9 @@ pub fn spawn_llm_task(
 }
 
 async fn call_llm(client: &reqwest::Client, config: &LlmConfig, text: &str) -> Result<String> {
+    let sys_prompt = prompt::system_prompt(config.writing_mode);
     match config.provider {
-        Provider::Claude => claude::cleanup(client, &config.api_key, &config.model, text).await,
+        Provider::Claude => claude::cleanup(client, &config.api_key, &config.model, text, &sys_prompt).await,
         Provider::OpenAI => {
             openai::cleanup(
                 client,
@@ -77,11 +78,12 @@ async fn call_llm(client: &reqwest::Client, config: &LlmConfig, text: &str) -> R
                 &config.model,
                 text,
                 "https://api.openai.com/v1/chat/completions",
+                &sys_prompt,
             )
             .await
         }
         Provider::OpenRouter => {
-            openrouter::cleanup(client, &config.api_key, &config.model, text).await
+            openrouter::cleanup(client, &config.api_key, &config.model, text, &sys_prompt).await
         }
     }
 }

@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use super::prompt::SYSTEM_PROMPT;
 
 #[derive(Serialize)]
 struct ChatRequest {
@@ -37,13 +36,14 @@ pub async fn cleanup(
     model: &str,
     text: &str,
     endpoint: &str,
+    system_prompt: &str,
 ) -> Result<String> {
     let body = ChatRequest {
         model: model.to_string(),
         messages: vec![
             Message {
                 role: "system".to_string(),
-                content: SYSTEM_PROMPT.to_string(),
+                content: system_prompt.to_string(),
             },
             Message {
                 role: "user".to_string(),

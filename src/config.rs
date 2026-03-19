@@ -2,6 +2,55 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WritingMode {
+    Writing,
+    Screenplay,
+    Notes,
+}
+
+impl WritingMode {
+    pub fn label(&self) -> &'static str {
+        match self {
+            WritingMode::Writing => "Writing",
+            WritingMode::Screenplay => "Screenplay",
+            WritingMode::Notes => "Notes",
+        }
+    }
+
+    pub fn env_value(&self) -> &'static str {
+        match self {
+            WritingMode::Writing => "writing",
+            WritingMode::Screenplay => "screenplay",
+            WritingMode::Notes => "notes",
+        }
+    }
+
+    pub fn from_env(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "screenplay" => WritingMode::Screenplay,
+            "notes" => WritingMode::Notes,
+            _ => WritingMode::Writing,
+        }
+    }
+
+    pub fn next(&self) -> Self {
+        match self {
+            WritingMode::Writing => WritingMode::Screenplay,
+            WritingMode::Screenplay => WritingMode::Notes,
+            WritingMode::Notes => WritingMode::Writing,
+        }
+    }
+
+    pub fn prev(&self) -> Self {
+        match self {
+            WritingMode::Writing => WritingMode::Notes,
+            WritingMode::Screenplay => WritingMode::Writing,
+            WritingMode::Notes => WritingMode::Screenplay,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Provider {
     Claude,
@@ -24,6 +73,7 @@ pub struct LlmConfig {
     pub provider: Provider,
     pub api_key: String,
     pub model: String,
+    pub writing_mode: WritingMode,
 }
 
 impl LlmConfig {
@@ -75,6 +125,7 @@ fn try_claude(model: Option<String>) -> Option<LlmConfig> {
         provider: Provider::Claude,
         api_key: key,
         model: model.unwrap_or_else(|| "claude-haiku-4-5-20241022".to_string()),
+        writing_mode: load_writing_mode(),
     })
 }
 
@@ -83,6 +134,7 @@ fn try_openai(model: Option<String>) -> Option<LlmConfig> {
         provider: Provider::OpenAI,
         api_key: key,
         model: model.unwrap_or_else(|| "gpt-5.4-nano".to_string()),
+        writing_mode: load_writing_mode(),
     })
 }
 
@@ -91,6 +143,7 @@ fn try_openrouter(model: Option<String>) -> Option<LlmConfig> {
         provider: Provider::OpenRouter,
         api_key: key,
         model: model.unwrap_or_else(|| "anthropic/claude-haiku".to_string()),
+        writing_mode: load_writing_mode(),
     })
 }
 
@@ -113,6 +166,12 @@ const PROVIDER_FULL_URLS: [&str; 3] = [
     "https://openrouter.ai/keys",
 ];
 const ENV_VAR_NAMES: [&str; 3] = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"];
+
+pub fn load_writing_mode() -> WritingMode {
+    env::var("WRITING_MODE")
+        .map(|v| WritingMode::from_env(&v))
+        .unwrap_or(WritingMode::Writing)
+}
 
 pub fn load_saved_keys() -> [String; 3] {
     let mut keys = [String::new(), String::new(), String::new()];
@@ -137,7 +196,7 @@ pub fn load_saved_keys() -> [String; 3] {
     keys
 }
 
-pub fn save_api_keys(keys: &[String; 3], preferred: Option<u8>, model: &str) {
+pub fn save_api_keys(keys: &[String; 3], preferred: Option<u8>, model: &str, writing_mode: WritingMode) {
     let dir = config_dir();
     let _ = fs::create_dir_all(&dir);
 
@@ -175,6 +234,9 @@ pub fn save_api_keys(keys: &[String; 3], preferred: Option<u8>, model: &str) {
     } else {
         env::remove_var("LLM_MODEL");
     }
+
+    content.push_str(&format!("WRITING_MODE={}\n", writing_mode.env_value()));
+    env::set_var("WRITING_MODE", writing_mode.env_value());
 
     let _ = fs::write(env_file_path(), content);
 
