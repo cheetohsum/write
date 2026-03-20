@@ -17,9 +17,7 @@
 ---
 
 <p align="center">
-  <video src="assets/demo.mp4" width="100%" autoplay loop muted>
-    Your browser does not support the video tag.
-  </video>
+  <img src="assets/demo.gif" alt="Write demo" width="720">
 </p>
 
 Write is a standalone writing application built in Rust. It opens its own window — double-click the exe, start writing. An LLM runs in the background to fix typos and spelling mistakes using surrounding context, so you never break flow. Documents save as `.md` files.
