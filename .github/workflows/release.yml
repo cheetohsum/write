@@ -28,7 +28,7 @@ jobs:
       - name: Build
         run: cargo build --release --target x86_64-pc-windows-msvc
 
-      - name: Package
+      - name: Package zip
         shell: bash
         run: |
           mkdir -p dist/Write
@@ -38,10 +38,19 @@ jobs:
           cp assets/icon.ico dist/Write/
           cd dist && 7z a -tzip ../Write-windows-x86_64.zip Write/
 
+      - name: Build installer
+        shell: bash
+        run: |
+          APP_VERSION="${{ github.ref_name }}"
+          APP_VERSION="${APP_VERSION#v}"
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" //DMyAppVersion="$APP_VERSION" installer/write.iss
+
       - uses: actions/upload-artifact@v4
         with:
           name: Write-windows-x86_64
-          path: Write-windows-x86_64.zip
+          path: |
+            Write-windows-x86_64.zip
+            dist/Write-Installer-x86_64.exe
 
   build-macos-arm:
     runs-on: macos-latest
@@ -155,13 +164,14 @@ jobs:
       - name: Prepare assets
         run: |
           ls -laR artifacts/
-          find artifacts/ -type f \( -name '*.zip' -o -name '*.dmg' \) -exec mv {} ./ \;
-          ls -la *.zip *.dmg
+          find artifacts/ -type f \( -name '*.zip' -o -name '*.dmg' -o -name '*.exe' \) -exec mv {} ./ \;
+          ls -la *.zip *.dmg *.exe
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            Write-Installer-x86_64.exe
             Write-windows-x86_64.zip
             Write-macos-aarch64.dmg
             Write-macos-x86_64.dmg
